@@ -1,4 +1,4 @@
-use actix_web::{HttpResponse, web, put, get, head};
+use actix_web::{HttpResponse, web, put, get, head, delete, HttpRequest};
 use tracing::log::warn;
 use tracing::{debug, info};
 
@@ -122,4 +122,25 @@ pub async fn manifest_exists(path: web::Path<(String, String)>, state: web::Data
         .append_header(("Content-Length", manifest_content.len()))
         .append_header(("Docker-Distribution-API-Version", "registry/2.0"))
         .body(manifest_content)
+}
+
+#[delete("/{reference}")]
+pub async fn delete_manifest(path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+    let (name, reference) = (path.0.to_owned(), path.1.to_owned());
+
+    let headers = req.headers();
+    let _authorization = headers.get("Authorization").unwrap(); // TODO:
+
+    let database = &state.database;
+
+    // If `reference` is a digest, then we're deleting a manifest, else a tag
+    if Digest::is_digest(&reference) {
+        database.delete_manifest(&name, &reference).await.unwrap();
+    } else {
+        database.delete_tag(&name, &reference).await.unwrap();
+    }
+
+    HttpResponse::Accepted()
+        .append_header(("Content-Length", "None"))
+        .finish()
 }

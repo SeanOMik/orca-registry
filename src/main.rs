@@ -43,10 +43,15 @@ async fn main() -> std::io::Result<()> {
                     .service(
                         web::scope("/{name}")
                             .service(
+                                web::scope("/tags")
+                                    .service(api::tags::list_tags)
+                            )
+                            .service(
                                 web::scope("/manifests")
                                     .service(api::manifests::upload_manifest)
                                     .service(api::manifests::pull_manifest)
                                     .service(api::manifests::manifest_exists)
+                                    .service(api::manifests::delete_manifest)
                             )
                             .service(
                                 web::scope("/blobs")

@@ -16,12 +16,10 @@ pub trait Database {
 
     /// Create the tables in the database
     async fn create_schema(&self) -> sqlx::Result<()>;
-    /// Check if the database is storing the digest.
-    async fn has_digest(&self, digest: &str) -> bool;
     /// Get the digest bytes
     async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>>;
     /// Get the length of the digest
-    async fn digest_length(&self, digest: &str) -> usize;
+    async fn digest_length(&self, digest: &str) -> sqlx::Result<usize>;
     /// Save digest bytes
     async fn save_digest(&self, digest: &str, bytes: &Bytes) -> sqlx::Result<()>;
     /// Delete digest
@@ -29,10 +27,13 @@ pub trait Database {
     /// Replace the uuid with a digest
     async fn replace_digest(&self, uuid: &str, new_digest: &str) -> sqlx::Result<()>;
     async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
-    async fn unlink_manifest_layer(&self, repository: &str, layer_digest: &str);
+    async fn unlink_manifest_layer(&self, repository: &str, layer_digest: &str) -> sqlx::Result<()>;
 
     // Tag related functions
 
+    /// Get tags associated with a repository
+    async fn list_repository_tags(&self, repository: &str,) -> sqlx::Result<Vec<Tag>>;
+    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> sqlx::Result<Vec<Tag>>;
     /// Get a manifest digest using the tag name.
     async fn get_tag(&self, repository: &str, tag: &str) -> sqlx::Result<Option<Tag>>;
     /// Save a tag and reference it to the manifest digest.
@@ -53,6 +54,8 @@ pub trait Database {
 
     /// Create a repository
     async fn save_repository(&self, repository: &str) -> sqlx::Result<()>;
+    /// List all repositories
+    async fn list_repositories(&self) -> sqlx::Result<Vec<String>>;
 }
 
 #[async_trait]
@@ -64,10 +67,6 @@ impl Database for Pool<Sqlite> {
         debug!("Created database schema");
 
         Ok(())
-    }
-
-    async fn has_digest(&self, _digest: &str) -> bool {
-        todo!()
     }
 
     async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>> {
@@ -93,8 +92,12 @@ impl Database for Pool<Sqlite> {
         Ok(Some(bytes))
     }
 
-    async fn digest_length(&self, _digest: &str) -> usize {
-        todo!()
+    async fn digest_length(&self, digest: &str) -> sqlx::Result<usize> {
+        let row: (i64, ) = sqlx::query_as("SELECT length(blob) FROM layer_blobs WHERE digest = ?")
+            .bind(digest)
+            .fetch_one(self).await?;
+
+        Ok(row.0 as usize)
     }
 
     async fn save_digest(&self, digest: &str, bytes: &Bytes) -> sqlx::Result<()> {
@@ -143,10 +146,57 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn unlink_manifest_layer(&self, _repository: &str, _layer_digest: &str) {
-        todo!()
+    async fn unlink_manifest_layer(&self, repository: &str, layer_digest: &str) -> sqlx::Result<()> {
+        sqlx::query("DELETE FROM manifest_layers WHERE layer_digest = ? AND manifest IN (SELECT digest FROM image_manifests WHERE repository = ?) RETURNING manifest, layer_digest")
+            .bind(layer_digest)
+            .bind(repository)
+            .execute(self).await?;
+
+        debug!("Removed link of layer {} from manifest in {} repository", layer_digest, repository);
+
+        Ok(())
     }
 
+    async fn list_repository_tags(&self, repository: &str,) -> sqlx::Result<Vec<Tag>> {
+        let rows: Vec<(String, String, i64, )> = sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ?")
+                .bind(repository)
+                .fetch_all(self).await?;
+
+        // Convert the rows into `Tag`
+        let tags: Vec<Tag> = rows.into_iter().map(|row| {
+            let last_updated: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_opt(row.2, 0).unwrap(), Utc);
+            Tag::new(row.0, repository.to_string(), last_updated, row.1)
+        }).collect();
+
+        Ok(tags)
+    }
+
+    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> sqlx::Result<Vec<Tag>> {
+        // Query differently depending on if `last_tag` was specified
+        let rows: Vec<(String, String, i64, )> = match last_tag {
+            Some(last_tag) => {
+                sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ? AND name > ? ORDER BY name LIMIT ?")
+                    .bind(repository)
+                    .bind(last_tag)
+                    .bind(limit)
+                    .fetch_all(self).await?
+            },
+            None => {
+                sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ? ORDER BY name LIMIT ?")
+                    .bind(repository)
+                    .bind(limit)
+                    .fetch_all(self).await?
+            }
+        };
+
+        // Convert the rows into `Tag`
+        let tags: Vec<Tag> = rows.into_iter().map(|row| {
+            let last_updated: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_opt(row.2, 0).unwrap(), Utc);
+            Tag::new(row.0, repository.to_string(), last_updated, row.1)
+        }).collect();
+
+        Ok(tags)
+    }
 
     async fn get_tag(&self, repository: &str, tag: &str) -> sqlx::Result<Option<Tag>> {
         let row: (String, i64, ) = match sqlx::query_as("SELECT image_manifest, last_updated FROM image_tags WHERE name = ? AND repository = ?")
@@ -233,5 +283,14 @@ impl Database for Pool<Sqlite> {
             .execute(self).await?;
         
         Ok(())
+    }
+
+    async fn list_repositories(&self) -> sqlx::Result<Vec<String>> {
+        let repos: Vec<(String, )> = sqlx::query_as("SELECT name FROM repositories")
+            .fetch_all(self).await?;
+        // Move out of repos
+        let repos = repos.into_iter().map(|row| row.0).collect();
+
+        Ok(repos)
     }
 }
