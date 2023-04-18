@@ -17,7 +17,7 @@ pub trait Database {
     /// Create the tables in the database
     async fn create_schema(&self) -> sqlx::Result<()>;
     /// Get the digest bytes
-    async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>>;
+    /* async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>>;
     /// Get the length of the digest
     async fn digest_length(&self, digest: &str) -> sqlx::Result<usize>;
     /// Save digest bytes
@@ -25,9 +25,7 @@ pub trait Database {
     /// Delete digest
     async fn delete_digest(&self, digest: &str) -> sqlx::Result<()>;
     /// Replace the uuid with a digest
-    async fn replace_digest(&self, uuid: &str, new_digest: &str) -> sqlx::Result<()>;
-    async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
-    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
+    async fn replace_digest(&self, uuid: &str, new_digest: &str) -> sqlx::Result<()>; */
 
     // Tag related functions
 
@@ -48,7 +46,10 @@ pub trait Database {
     /// Save a manifest's content.
     async fn save_manifest(&self, repository: &str, digest: &str, content: &str) -> sqlx::Result<()>;
     /// Delete a manifest
-    async fn delete_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<()>;
+    /// Returns digests that this manifest pointed to.
+    async fn delete_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<Vec<String>>;
+    async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
+    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
 
     // Repository related functions
 
@@ -70,7 +71,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>> {
+    /* async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>> {
         // Handle RowNotFound errors
         let row: (Vec<u8>, ) = match sqlx::query_as("SELECT blob FROM layer_blobs WHERE digest = ?")
                 .bind(digest)
@@ -134,7 +135,7 @@ impl Database for Pool<Sqlite> {
         debug!("Replaced digest uuid {} to digest {}", uuid, new_digest);
 
         Ok(())
-    }
+    } */
 
     async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()> {
         sqlx::query("INSERT INTO manifest_layers(manifest, layer_digest) VALUES (?, ?)")
@@ -269,7 +270,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn delete_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<()> {
+    async fn delete_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<Vec<String>> {
         sqlx::query("DELETE FROM image_manifests where digest = ? AND repository = ?")
             .bind(digest)
             .bind(repository)
@@ -283,11 +284,8 @@ impl Database for Pool<Sqlite> {
         
         debug!("Unlinked manifest {} from all linked layers", digest);
 
-        for row in rows.into_iter() {
-            let layer_digest = row.0;
 
-            self.delete_digest(&layer_digest).await?;
-        }
+        let digests = rows.into_iter().map(|r| r.0).collect();
 
         debug!("Deleted all digests for manifest {}", digest);
 
@@ -297,7 +295,7 @@ impl Database for Pool<Sqlite> {
 
         debug!("Deleted all image tags for manifest {}", digest);
 
-        Ok(())
+        Ok(digests)
     }
 
     async fn save_repository(&self, repository: &str) -> sqlx::Result<()> {

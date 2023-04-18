@@ -1,11 +1,13 @@
 use actix_web::{HttpResponse, HttpRequest, post, web, patch, put, delete, get};
 use bytes::{BytesMut, Bytes, BufMut};
 use qstring::QString;
+use tokio::io::AsyncWriteExt;
 use tracing::{debug};
 
 use crate::app_state::AppState;
 
 use crate::database::Database;
+use crate::storage::filesystem::FilesystemDriver;
 
 /// Starting an upload
 #[post("/")]
@@ -31,25 +33,21 @@ pub async fn chunked_upload_layer(body: Bytes, path: web::Path<(String, String)>
 
     debug!("Read body of size: {}", body.len());
 
-    let database = &state.database;
-    let (starting, ending) = match database.get_digest(&layer_uuid).await.unwrap() {
-        Some(current_bytes) => {
-            let mut combined = BytesMut::new();
-            let body_size = body.len();
-            let current_size = current_bytes.len();
+    let storage = state.storage.lock().await;
 
-            combined.put(current_bytes);
-            combined.put(body);
+    let current_size = storage.digest_length(&layer_uuid).await.unwrap();
+    let (starting, ending) = if let Some(current_size) = current_size {
+        let body_size = body.len();
 
-            database.save_digest(&layer_uuid, &combined.into()).await.unwrap();
+        storage.save_digest(&layer_uuid, &body, true).await.unwrap();
 
-            (current_size, current_size + body_size)
-        },
-        None => {
-            let body_size = body.len();
-            database.save_digest(&layer_uuid, &body.into()).await.unwrap();
-            (0, body_size)
-        }
+        (current_size, current_size + body_size)
+    } else {
+        let body_size = body.len();
+
+        storage.save_digest(&layer_uuid, &body, true).await.unwrap();
+
+        (0, body_size)
     };
 
     debug!("s={}, e={}, uuid={}, uri={}", starting, ending, layer_uuid, full_uri);
@@ -69,20 +67,15 @@ pub async fn finish_chunked_upload(body: Bytes, path: web::Path<(String, String)
     let qs = QString::from(req.query_string());
     let digest = qs.get("digest").unwrap();
 
-    let database = &state.database;
+    let storage = state.storage.lock().await;
     if !body.is_empty() {
-        let current_bytes = database.get_digest(&layer_uuid).await.unwrap().unwrap();
-        let mut combined = BytesMut::new();
-
-        combined.put(current_bytes);
-        combined.put(body);
-
-        database.save_digest(&layer_uuid, &combined.into()).await.unwrap();
+        storage.save_digest(&layer_uuid, &body, true).await.unwrap();
     } else {
         // TODO: Validate layer with all digest params
     }
 
-    database.replace_digest(&layer_uuid, &digest).await.unwrap();
+    storage.replace_digest(&layer_uuid, &digest).await.unwrap();
+    debug!("Completed upload, finished uuid {} to digest {}", layer_uuid, digest);
 
     HttpResponse::Created()
         .insert_header(("Location", format!("/v2/{}/blobs/{}", name, digest)))
@@ -95,8 +88,8 @@ pub async fn finish_chunked_upload(body: Bytes, path: web::Path<(String, String)
 pub async fn cancel_upload(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
     let (_name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
 
-    let database = &state.database;
-    database.delete_digest(&layer_uuid).await.unwrap();
+    let storage = state.storage.lock().await;
+    storage.delete_digest(&layer_uuid).await.unwrap();
     
     // I'm not sure what this response should be, its not specified in the registry spec.
     HttpResponse::Ok()
@@ -107,15 +100,8 @@ pub async fn cancel_upload(path: web::Path<(String, String)>, state: web::Data<A
 pub async fn check_upload_status(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
     let (name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
     
-    let database = &state.database;
-    let ending = match database.get_digest(&layer_uuid).await.unwrap() {
-        Some(current_bytes) => {
-            current_bytes.len()
-        },
-        None => {
-            0
-        }
-    };
+    let storage = state.storage.lock().await;
+    let ending = storage.digest_length(&layer_uuid).await.unwrap().unwrap_or(0);
 
     HttpResponse::Created()
         .insert_header(("Location", format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)))

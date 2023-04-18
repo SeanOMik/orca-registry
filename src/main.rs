@@ -2,15 +2,20 @@ mod api;
 mod app_state;
 mod database;
 mod dto;
+mod storage;
 
 use actix_web::{web, App, HttpServer};
 use actix_web::middleware::Logger;
 
 use sqlx::sqlite::SqlitePoolOptions;
+use tokio::sync::Mutex;
 use tracing::{debug, Level};
 
 use app_state::AppState;
 use database::Database;
+
+use crate::storage::StorageDriver;
+use crate::storage::filesystem::FilesystemDriver;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -22,7 +27,9 @@ async fn main() -> std::io::Result<()> {
 
     //let db_conn: Mutex<dyn Database> = Mutex::new(SqliteConnection::establish("test.db").unwrap());
     //let db = Mutex::new(Database::new_sqlite_connection("test.db").unwrap());
-    let state = web::Data::new(AppState::new(pool));
+    let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
+
+    let state = web::Data::new(AppState::new(pool, storage_driver));
 
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
