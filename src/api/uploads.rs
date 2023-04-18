@@ -1,4 +1,4 @@
-use actix_web::{HttpResponse, HttpRequest, post, web, patch, put, delete};
+use actix_web::{HttpResponse, HttpRequest, post, web, patch, put, delete, get};
 use bytes::{BytesMut, Bytes, BufMut};
 use qstring::QString;
 use tracing::{debug};
@@ -84,8 +84,6 @@ pub async fn finish_chunked_upload(body: Bytes, path: web::Path<(String, String)
 
     database.replace_digest(&layer_uuid, &digest).await.unwrap();
 
-    //let first_digest = digest.first().unwrap().to_owned();
-
     HttpResponse::Created()
         .insert_header(("Location", format!("/v2/{}/blobs/{}", name, digest)))
         .insert_header(("Content-Length", 0))
@@ -102,5 +100,26 @@ pub async fn cancel_upload(path: web::Path<(String, String)>, state: web::Data<A
     
     // I'm not sure what this response should be, its not specified in the registry spec.
     HttpResponse::Ok()
+        .finish()
+}
+
+#[get("/{uuid}")]
+pub async fn check_upload_status(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
+    let (name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
+    
+    let database = &state.database;
+    let ending = match database.get_digest(&layer_uuid).await.unwrap() {
+        Some(current_bytes) => {
+            current_bytes.len()
+        },
+        None => {
+            0
+        }
+    };
+
+    HttpResponse::Created()
+        .insert_header(("Location", format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)))
+        .insert_header(("Range", format!("0-{}", ending)))
+        .insert_header(("Docker-Upload-Digest", layer_uuid))
         .finish()
 }

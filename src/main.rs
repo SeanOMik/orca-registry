@@ -15,7 +15,7 @@ use database::Database;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .max_connections(15)
         .connect("test.db").await.unwrap();
 
     pool.create_schema().await.unwrap();
@@ -28,7 +28,8 @@ async fn main() -> std::io::Result<()> {
         .with_max_level(Level::DEBUG)
         .init();
 
-    let payload_config = web::PayloadConfig::new(31_460_000); // 30mb
+    // TODO: Make configurable by deployment
+    let payload_config = web::PayloadConfig::new(5 * 1024 * 1024 * 1024); // 5Gb 
 
     debug!("Starting http server...");
 
@@ -68,6 +69,7 @@ async fn main() -> std::io::Result<()> {
                                             .service(api::uploads::chunked_upload_layer)
                                             .service(api::uploads::finish_chunked_upload)
                                             .service(api::uploads::cancel_upload)
+                                            .service(api::uploads::check_upload_status)
                                             // TODO: Cross Repository Blob Mount
                                     )
                             )
