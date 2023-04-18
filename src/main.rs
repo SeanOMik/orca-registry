@@ -3,13 +3,10 @@ mod app_state;
 mod database;
 mod dto;
 
-use std::sync::Arc;
-
 use actix_web::{web, App, HttpServer};
 use actix_web::middleware::Logger;
 
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio::sync::Mutex;
 use tracing::{debug, Level};
 
 use app_state::AppState;

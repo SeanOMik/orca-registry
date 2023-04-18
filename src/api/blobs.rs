@@ -1,5 +1,4 @@
-use actix_web::{HttpResponse, get, HttpRequest, post, web, head, delete};
-use tracing::{debug, trace};
+use actix_web::{HttpResponse, get, HttpRequest, web, head, delete};
 
 use crate::app_state::AppState;
 
@@ -37,6 +36,6 @@ pub async fn pull_digest(path: web::Path<(String, String)>, state: web::Data<App
 }
 
 #[delete("/{digest}")]
-pub async fn delete_digest(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+pub async fn delete_digest(_req: HttpRequest, _state: web::Data<AppState>) -> HttpResponse {
     todo!()
 }

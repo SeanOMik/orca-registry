@@ -1,15 +1,15 @@
-use actix_web::{HttpResponse, HttpRequest, web, put, get, head};
+use actix_web::{HttpResponse, web, put, get, head};
 use tracing::log::warn;
-use tracing::{debug, trace, info};
+use tracing::{debug, info};
 
 use crate::app_state::AppState;
 
 use crate::database::Database;
 use crate::dto::digest::Digest;
-use crate::dto::manifest::{Manifest, ImageManifest};
+use crate::dto::manifest::Manifest;
 
 #[put("/{reference}")]
-pub async fn upload_manifest(path: web::Path<(String, String)>, body: String, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+pub async fn upload_manifest(path: web::Path<(String, String)>, body: String, state: web::Data<AppState>) -> HttpResponse {
     let (name, reference) = (path.0.to_owned(), path.1.to_owned());
 
     // Calculate the sha256 digest for the manifest.
@@ -54,7 +54,7 @@ pub async fn upload_manifest(path: web::Path<(String, String)>, body: String, re
 }
 
 #[get("/{reference}")]
-pub async fn pull_manifest(path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+pub async fn pull_manifest(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
     let (name, reference) = (path.0.to_owned(), path.1.to_owned());
 
     let database = &state.database;

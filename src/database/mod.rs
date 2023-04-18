@@ -2,8 +2,7 @@ use std::io::Read;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use sqlx::{sqlite::SqliteConnection, Sqlite, Pool};
-use tokio::sync::Mutex;
+use sqlx::{Sqlite, Pool};
 use tracing::debug;
 
 use chrono::{DateTime, Utc, NaiveDateTime};
@@ -67,7 +66,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn has_digest(&self, digest: &str) -> bool {
+    async fn has_digest(&self, _digest: &str) -> bool {
         todo!()
     }
 
@@ -94,7 +93,7 @@ impl Database for Pool<Sqlite> {
         Ok(Some(bytes))
     }
 
-    async fn digest_length(&self, digest: &str) -> usize {
+    async fn digest_length(&self, _digest: &str) -> usize {
         todo!()
     }
 
@@ -144,7 +143,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn unlink_manifest_layer(&self, repository: &str, layer_digest: &str) {
+    async fn unlink_manifest_layer(&self, _repository: &str, _layer_digest: &str) {
         todo!()
     }
 

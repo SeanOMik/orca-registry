@@ -1,10 +1,8 @@
+#[allow(dead_code)]
+
 pub struct Digest {
     algorithm: String,
     hex: String,
-}
-
-pub enum DigestError {
-    InvalidDigestString(String),
 }
 
 impl Digest {
@@ -17,18 +15,5 @@ impl Digest {
         }
 
         false
-    }
-
-    pub fn from_string(s: &str) -> Result<Self, DigestError> {
-        if let Some(idx) = s.find(":") {
-            let (algo, hex) = s.split_at(idx);
-
-            return Ok(Self {
-                algorithm: algo.to_string(),
-                hex: hex.to_string(),
-            })
-        }
-
-        Err(DigestError::InvalidDigestString(String::from(s)))
     }
 }
