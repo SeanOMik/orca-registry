@@ -55,7 +55,7 @@ async fn main() -> std::io::Result<()> {
                                     .service(api::manifests::upload_manifest)
                                     .service(api::manifests::pull_manifest)
                                     .service(api::manifests::manifest_exists)
-                                    .service(api::manifests::delete_manifest)
+                                    .service(api::manifests::delete_manifest) // delete image
                             )
                             .service(
                                 web::scope("/blobs")

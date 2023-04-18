@@ -27,7 +27,7 @@ pub trait Database {
     /// Replace the uuid with a digest
     async fn replace_digest(&self, uuid: &str, new_digest: &str) -> sqlx::Result<()>;
     async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
-    async fn unlink_manifest_layer(&self, repository: &str, layer_digest: &str) -> sqlx::Result<()>;
+    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
 
     // Tag related functions
 
@@ -147,13 +147,13 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn unlink_manifest_layer(&self, repository: &str, layer_digest: &str) -> sqlx::Result<()> {
-        sqlx::query("DELETE FROM manifest_layers WHERE layer_digest = ? AND manifest IN (SELECT digest FROM image_manifests WHERE repository = ?) RETURNING manifest, layer_digest")
+    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()> {
+        sqlx::query("DELETE FROM manifest_layers WHERE manifest = ? AND layer_digest = ?")
+            .bind(manifest_digest)
             .bind(layer_digest)
-            .bind(repository)
             .execute(self).await?;
 
-        debug!("Removed link of layer {} from manifest in {} repository", layer_digest, repository);
+        debug!("Removed link between manifest {} and layer {}", manifest_digest, layer_digest);
 
         Ok(())
     }
@@ -274,6 +274,28 @@ impl Database for Pool<Sqlite> {
             .bind(digest)
             .bind(repository)
             .execute(self).await?;
+
+        debug!("Deleted manifest {} in repository {}", digest, repository);
+
+        let rows: Vec<(String, )> = sqlx::query_as("DELETE FROM manifest_layers WHERE manifest = ? RETURNING layer_digest")
+            .bind(digest)
+            .fetch_all(self).await?;
+        
+        debug!("Unlinked manifest {} from all linked layers", digest);
+
+        for row in rows.into_iter() {
+            let layer_digest = row.0;
+
+            self.delete_digest(&layer_digest).await?;
+        }
+
+        debug!("Deleted all digests for manifest {}", digest);
+
+        sqlx::query("DELETE FROM image_tags where image_manifest = ?")
+            .bind(digest)
+            .execute(self).await?;
+
+        debug!("Deleted all image tags for manifest {}", digest);
 
         Ok(())
     }

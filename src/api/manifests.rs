@@ -132,13 +132,27 @@ pub async fn delete_manifest(path: web::Path<(String, String)>, req: HttpRequest
     let _authorization = headers.get("Authorization").unwrap(); // TODO:
 
     let database = &state.database;
+    let digest = match Digest::is_digest(&reference) {
+        true => {
+            // Check if the manifest exists
+            if database.get_manifest(&name, &reference).await.unwrap().is_none() {
+                return HttpResponse::NotFound()
+                    .finish();
+            }
 
-    // If `reference` is a digest, then we're deleting a manifest, else a tag
-    if Digest::is_digest(&reference) {
-        database.delete_manifest(&name, &reference).await.unwrap();
-    } else {
-        database.delete_tag(&name, &reference).await.unwrap();
-    }
+            reference.clone()
+        },
+        false => {
+            if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
+                tag.manifest_digest
+            } else {
+                return HttpResponse::NotFound()
+                    .finish();
+            }
+        }
+    };
+
+    database.delete_manifest(&name, &digest).await.unwrap();
 
     HttpResponse::Accepted()
         .append_header(("Content-Length", "None"))
