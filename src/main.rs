@@ -41,6 +41,10 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/v2")
                     .service(api::version_check)
                     .service(
+                        web::scope("/_catalog")
+                            .service(api::catalog::list_repositories)
+                    )
+                    .service(
                         web::scope("/{name}")
                             .service(
                                 web::scope("/tags")

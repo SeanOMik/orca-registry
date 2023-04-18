@@ -54,8 +54,9 @@ pub trait Database {
 
     /// Create a repository
     async fn save_repository(&self, repository: &str) -> sqlx::Result<()>;
-    /// List all repositories
-    async fn list_repositories(&self) -> sqlx::Result<Vec<String>>;
+    /// List all repositories. 
+    /// If limit is not specified, a default limit of 1000 will be returned.
+    async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> sqlx::Result<Vec<String>>;
 }
 
 #[async_trait]
@@ -285,11 +286,27 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn list_repositories(&self) -> sqlx::Result<Vec<String>> {
-        let repos: Vec<(String, )> = sqlx::query_as("SELECT name FROM repositories")
-            .fetch_all(self).await?;
-        // Move out of repos
-        let repos = repos.into_iter().map(|row| row.0).collect();
+    //async fn list_repositories(&self) -> sqlx::Result<Vec<String>> {
+    async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> sqlx::Result<Vec<String>> {
+        let limit = limit.unwrap_or(1000); // set default limit
+
+        // Query differently depending on if `last_repo` was specified
+        let rows: Vec<(String, )> = match last_repo {
+            Some(last_repo) => {
+                sqlx::query_as("SELECT name FROM repositories WHERE name > ? ORDER BY name LIMIT ?")
+                    .bind(last_repo)
+                    .bind(limit)
+                    .fetch_all(self).await?
+            },
+            None => {
+                sqlx::query_as("SELECT name FROM repositories ORDER BY name LIMIT ?")
+                    .bind(limit)
+                    .fetch_all(self).await?
+            }
+        };
+
+        // "unwrap" the tuple from the rows
+        let repos: Vec<String> = rows.into_iter().map(|row| row.0).collect();
 
         Ok(repos)
     }

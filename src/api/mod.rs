@@ -2,6 +2,7 @@ pub mod blobs;
 pub mod uploads;
 pub mod manifests;
 pub mod tags;
+pub mod catalog;
 
 use actix_web::{HttpResponse, get};
 
