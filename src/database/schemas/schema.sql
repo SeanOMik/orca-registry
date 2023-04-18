@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS repositories (
 CREATE TABLE IF NOT EXISTS image_manifests (
     digest TEXT NOT NULL PRIMARY KEY,
     repository TEXT NOT NULL,
-    value TEXT NOT NULL
+    content TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS layer_blobs (
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS image_tags (
     PRIMARY KEY (name, repository)
 );
 
-CREATE TABLE IF NOT EXISTS manifest_blobs (
+CREATE TABLE IF NOT EXISTS manifest_layers (
     manifest TEXT NOT NULL,
-    blob TEXT NOT NULL,
-    PRIMARY KEY (manifest, blob)
+    layer_digest TEXT NOT NULL,
+    PRIMARY KEY (manifest, layer_digest)
 );

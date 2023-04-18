@@ -20,7 +20,23 @@ pub async fn digest_exists(path: web::Path<(String, String)>, state: web::Data<A
     }
 }
 
+#[get("/{digest}")]
+pub async fn pull_digest(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
+    let (_name, layer_digest) = (path.0.to_owned(), path.1.to_owned());
+
+    let database = &state.database;
+    if let Some(bytes) = database.get_digest(&layer_digest).await.unwrap() {
+        HttpResponse::Ok()
+            .insert_header(("Content-Length", bytes.len()))
+            .insert_header(("Docker-Content-Digest", layer_digest))
+            .body(bytes)
+    } else {
+        HttpResponse::NotFound()
+            .finish()
+    }
+}
+
 #[delete("/{digest}")]
-pub async fn delete_layer(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+pub async fn delete_digest(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
     todo!()
 }

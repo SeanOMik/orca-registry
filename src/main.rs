@@ -1,6 +1,7 @@
 mod api;
 mod app_state;
 mod database;
+mod dto;
 
 use std::sync::Arc;
 
@@ -47,10 +48,14 @@ async fn main() -> std::io::Result<()> {
                             .service(
                                 web::scope("/manifests")
                                     .service(api::manifests::upload_manifest)
+                                    .service(api::manifests::pull_manifest)
+                                    .service(api::manifests::manifest_exists)
                             )
                             .service(
                                 web::scope("/blobs")
                                     .service(api::blobs::digest_exists)
+                                    .service(api::blobs::pull_digest)
+                                    .service(api::blobs::delete_digest)
                                     .service(
                                         web::scope("/uploads")
                                             .service(api::uploads::start_upload)
