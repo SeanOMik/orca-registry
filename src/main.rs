@@ -4,18 +4,21 @@ mod database;
 mod dto;
 mod storage;
 
+use std::sync::Arc;
+
 use actix_web::{web, App, HttpServer};
 use actix_web::middleware::Logger;
 
+use bytes::Bytes;
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, Level};
 
 use app_state::AppState;
 use database::Database;
 
 use crate::storage::StorageDriver;
-use crate::storage::filesystem::FilesystemDriver;
+use crate::storage::filesystem::{FilesystemDriver, FilesystemStreamer};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -25,9 +28,18 @@ async fn main() -> std::io::Result<()> {
 
     pool.create_schema().await.unwrap();
 
-    //let db_conn: Mutex<dyn Database> = Mutex::new(SqliteConnection::establish("test.db").unwrap());
-    //let db = Mutex::new(Database::new_sqlite_connection("test.db").unwrap());
-    let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
+    let storage_path = String::from("registry/blobs");
+    let (send, recv) = mpsc::channel::<(String, Bytes)>(50);
+    let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new(storage_path.clone(), send)));
+
+    // create the storage streamer
+    {
+        let path_clone = storage_path.clone();
+        actix_rt::spawn(async {
+            let mut streamer = FilesystemStreamer::new(path_clone, recv);
+            streamer.start_handling_streams().await.unwrap();
+        });
+    }
 
     let state = web::Data::new(AppState::new(pool, storage_driver));
 

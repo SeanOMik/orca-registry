@@ -1,13 +1,14 @@
 use actix_web::{HttpResponse, HttpRequest, post, web, patch, put, delete, get};
 use bytes::{BytesMut, Bytes, BufMut};
+use futures::{StreamExt, TryStreamExt};
 use qstring::QString;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug};
+use tracing::{debug, warn};
 
 use crate::app_state::AppState;
 
 use crate::database::Database;
-use crate::storage::filesystem::FilesystemDriver;
+use crate::storage::{StorageDriver, StorageDriverStreamer};
 
 /// Starting an upload
 #[post("/")]
@@ -27,30 +28,45 @@ pub async fn start_upload(path: web::Path<(String, )>) -> HttpResponse {
 }
 
 #[patch("/{uuid}")]
-pub async fn chunked_upload_layer(body: Bytes, path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+pub async fn chunked_upload_layer(/* body: Bytes */mut payload: web::Payload, path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
     let full_uri = req.uri().to_string();
     let (_name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
 
-    debug!("Read body of size: {}", body.len());
-
     let storage = state.storage.lock().await;
-
     let current_size = storage.digest_length(&layer_uuid).await.unwrap();
-    let (starting, ending) = if let Some(current_size) = current_size {
-        let body_size = body.len();
 
-        storage.save_digest(&layer_uuid, &body, true).await.unwrap();
+    let written_size = match storage.supports_streaming() {
+        true => {
+            let sender = storage.start_stream_channel();
+            let mut written_size = 0;
+            while let Some(item) = payload.next().await {
+                if let Ok(bytes) = item {
+                    written_size += bytes.len();
+                    sender.send((layer_uuid.clone(), bytes)).await.unwrap();
+                }
+            }
 
-        (current_size, current_size + body_size)
-    } else {
-        let body_size = body.len();
+            written_size
+        },
+        false => {
+            warn!("This storage driver does not support streaming! This means high memory usage during image pushes!");
 
-        storage.save_digest(&layer_uuid, &body, true).await.unwrap();
+            let mut bytes = web::BytesMut::new();
+            while let Some(item) = payload.next().await {
+                bytes.extend_from_slice(&item.unwrap());
+            }
 
-        (0, body_size)
+            let bytes_len = bytes.len();
+            storage.save_digest(&layer_uuid, &bytes.into(), true).await.unwrap();
+            bytes_len
+        }
     };
 
-    debug!("s={}, e={}, uuid={}, uri={}", starting, ending, layer_uuid, full_uri);
+    let (starting, ending) = if let Some(current_size) = current_size {
+        (current_size, current_size + written_size)
+    } else {
+        (0, written_size)
+    };
 
     HttpResponse::Accepted()
         .insert_header(("Location", full_uri))
