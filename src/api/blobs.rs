@@ -33,14 +33,7 @@ pub async fn pull_digest(path: web::Path<(String, String)>, state: web::Data<App
 
 
     if let Some(len) = storage.digest_length(&layer_digest).await.unwrap() {
-        let stream = storage.stream_bytes(&layer_digest).unwrap().unwrap();
-        /* let s = async_stream::stream! {
-            let stream = storage.stream_bytes(&layer_digest).unwrap().unwrap().as_ref();
-
-            while let Some(item) = stream.next().await {
-
-            }
-        }; */
+        let stream = storage.stream_bytes(&layer_digest).await.unwrap().unwrap();
 
         HttpResponse::Ok()
             .insert_header(("Content-Length", len))

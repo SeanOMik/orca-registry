@@ -90,38 +90,26 @@ impl StorageDriverStreamer for FilesystemDriver {
 
         Ok(Path::new(&path).exists())
     }
-
-    fn stream_bytes(&self, digest: &str) -> anyhow::Result<Option<ByteStream>> {
-        let path = self.get_digest_path(digest);
-
-        if self.has_digest(digest)? {
-            
-
-            //tokio::spawn(async {
-            let s = async_stream::try_stream! {
-                let file = fs::File::open(&path).await.unwrap();
-
-                let mut s = ReaderStream::new(file);
-                
-                while let Some(item) = s.next().await {
-                    if let Ok(bytes) = item {
-                        yield bytes;
-                        //sender.send((layer_uuid.clone(), bytes)).await.unwrap();
-                    }
-                }
-            //file.re
-            };
-            //});
-
-            Ok(Some(ByteStream::new(s)))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 #[async_trait]
 impl StorageDriver for FilesystemDriver {
+    async fn stream_bytes(&self, digest: &str) -> anyhow::Result<Option<ByteStream>> {
+        let file = match fs::File::open(self.get_digest_path(digest)).await {
+            Ok(f) => f,
+            Err(e) => match e.kind() {
+                ErrorKind::NotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(e).context("FilesystemDriver: Failure to open digest file");
+                }
+            }
+        };
+
+        let s = ReaderStream::new(file);
+        Ok(Some(ByteStream::new(s)))
+    }
 
     async fn get_digest(&self, digest: &str) -> anyhow::Result<Option<Bytes>> {
         let mut file = match fs::File::open(self.get_digest_path(digest))

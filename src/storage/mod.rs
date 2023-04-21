@@ -19,7 +19,7 @@ pub trait StorageDriverStreamer {
     fn supports_streaming(&self) -> bool;
     fn start_stream_channel(&self) -> mpsc::Sender<(String, Bytes)>;
     fn has_digest(&self, digest: &str) -> anyhow::Result<bool>;
-    fn stream_bytes(&self, digest: &str) -> anyhow::Result<Option<ByteStream>>;
+    //fn stream_bytes(&self, digest: &str) -> anyhow::Result<Option<ByteStream>>;
 }
 
 #[async_trait]
@@ -31,5 +31,6 @@ pub trait StorageDriver: Send + StorageDriverStreamer/* : AsyncWrite + AsyncRead
     async fn delete_digest(&self, digest: &str) -> anyhow::Result<()>;
     async fn replace_digest(&self, uuid: &str, digest: &str) -> anyhow::Result<()>;
 
+    async fn stream_bytes(&self, digest: &str) -> anyhow::Result<Option<ByteStream>>;
     //async fn stream_bytes(&self, stream: Box<dyn Stream<Item = Bytes>>) -> anyhow::Result<()>;
 }
