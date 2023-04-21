@@ -3,6 +3,7 @@ mod app_state;
 mod database;
 mod dto;
 mod storage;
+mod byte_stream;
 
 use std::sync::Arc;
 

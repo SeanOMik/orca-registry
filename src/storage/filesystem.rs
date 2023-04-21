@@ -1,19 +1,18 @@
-use std::{path::Path, io::ErrorKind, sync::Arc, collections::HashMap};
+use std::{path::Path, io::{ErrorKind, BufRead, BufReader, Read}, sync::Arc, collections::HashMap};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::{executor::block_on, StreamExt};
+use futures::{executor::block_on, StreamExt, Stream};
 use tokio::{fs, io::{AsyncWriteExt, AsyncReadExt}, task::spawn_blocking, sync::{Mutex, mpsc}};
+use tokio_util::io::ReaderStream;
 use tracing::debug;
+
+use crate::byte_stream::ByteStream;
 
 use super::{StorageDriver, StorageDriverStreamer, Streamer};
 
 pub struct FilesystemStreamer {
-    /* new_streams_channel: mpsc::Receiver<(String, mpsc::Receiver<Bytes>)>,
-    // (digest, receiver)
-    streaming_channels: Vec<(String, )>, */
-
     storage_path: String,
     chunk_channel: mpsc::Receiver<(String, Bytes)>,
     cached_files: HashMap<String, fs::File>,
@@ -61,45 +60,19 @@ impl Streamer for FilesystemStreamer {
 
 pub struct FilesystemDriver {
     storage_path: String,
-    // (digest, receiver)
-    streaming_channels: Vec<(String, mpsc::Receiver<Bytes>)>,
     streamer_sender: mpsc::Sender<(String, Bytes)>,
 }
 
 impl FilesystemDriver {
-    //pub fn new(storage_path: &str) -> FilesystemDriver {
     pub fn new(storage_path: String, stream_sender: mpsc::Sender<(String, Bytes)>) -> FilesystemDriver {
-        /* let (send, recv) = mpsc::channel::<(String, Bytes)>(50);
-        let streamer = Arc::new(FilesystemStreamer::new(storage_path.to_string(), recv)); */
-
         Self {
             storage_path,
-            streaming_channels: vec![],
             streamer_sender: stream_sender,
         }
     }
 
     fn get_digest_path(&self, digest: &str) -> String {
         format!("{}/{}", self.storage_path, digest)
-    }
-
-    async fn write_payload(&self, digest: &str, mut payload: actix_web::web::Payload, append: bool) -> anyhow::Result<usize> {
-        let path = self.get_digest_path(digest);
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .append(append)
-            .create(true)
-            .open(path).await?;
-
-        let mut total_size = 0;
-        while let Some(item) = payload.next().await {
-            let item = item?;
-
-            total_size += item.len();
-            file.write_all(&item).await?;
-        }
-
-        Ok(total_size)
     }
 }
 
@@ -111,17 +84,44 @@ impl StorageDriverStreamer for FilesystemDriver {
     fn start_stream_channel(&self) -> mpsc::Sender<(String, Bytes)> {
         self.streamer_sender.clone()
     }
+
+    fn has_digest(&self, digest: &str) -> anyhow::Result<bool> {
+        let path = self.get_digest_path(digest);
+
+        Ok(Path::new(&path).exists())
+    }
+
+    fn stream_bytes(&self, digest: &str) -> anyhow::Result<Option<ByteStream>> {
+        let path = self.get_digest_path(digest);
+
+        if self.has_digest(digest)? {
+            
+
+            //tokio::spawn(async {
+            let s = async_stream::try_stream! {
+                let file = fs::File::open(&path).await.unwrap();
+
+                let mut s = ReaderStream::new(file);
+                
+                while let Some(item) = s.next().await {
+                    if let Ok(bytes) = item {
+                        yield bytes;
+                        //sender.send((layer_uuid.clone(), bytes)).await.unwrap();
+                    }
+                }
+            //file.re
+            };
+            //});
+
+            Ok(Some(ByteStream::new(s)))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[async_trait]
 impl StorageDriver for FilesystemDriver {
-    async fn has_digest(&self, digest: &str) -> anyhow::Result<bool> {
-        let path = self.get_digest_path(digest);
-
-        spawn_blocking(move || {
-            return Path::new(&path).exists()
-        }).await.context("FilesystemDriver: Failure to spawn blocking thread to check digest")
-    }
 
     async fn get_digest(&self, digest: &str) -> anyhow::Result<Option<Bytes>> {
         let mut file = match fs::File::open(self.get_digest_path(digest))
@@ -137,12 +137,26 @@ impl StorageDriver for FilesystemDriver {
                         .context("FilesystemDriver: Failure to open digest file");
                 }
             }
-        };
+        }; 
 
         let mut buf = Vec::new();
         file.read_to_end(&mut buf).await?;
 
         Ok(Some(Bytes::from_iter(buf)))
+    }
+
+    async fn get_digest_stream(&self, digest: &str) -> anyhow::Result<Option<ByteStream>> {
+        let path = self.get_digest_path(digest);
+
+        /* if self.has_digest(digest) {
+            let s = async_stream::stream! {
+
+            };
+        } else {
+            Ok(None)
+        } */
+
+        todo!()
     }
 
     async fn digest_length(&self, digest: &str) -> anyhow::Result<Option<usize>> {
