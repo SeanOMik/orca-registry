@@ -3,4 +3,4 @@
 - [ ] postgresql
 - [ ] prometheus metrics
 - [x] streaming layer bytes into providers
-- [x] streaming layer bytes from providers
+- [ ] streaming layer bytes from providers
