@@ -28,7 +28,7 @@ pub async fn start_upload(path: web::Path<(String, )>) -> HttpResponse {
 }
 
 #[patch("/{uuid}")]
-pub async fn chunked_upload_layer(/* body: Bytes */mut payload: web::Payload, path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
+pub async fn chunked_upload_layer(mut payload: web::Payload, path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
     let full_uri = req.uri().to_string();
     let (_name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
 

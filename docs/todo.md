@@ -2,4 +2,5 @@
 - [ ] Simple auth
 - [ ] postgresql
 - [ ] prometheus metrics
-- [ ] streaming layer bytes into providers
+- [x] streaming layer bytes into providers
+- [x] streaming layer bytes from providers

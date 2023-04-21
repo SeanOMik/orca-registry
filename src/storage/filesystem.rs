@@ -104,30 +104,8 @@ impl FilesystemDriver {
 }
 
 impl StorageDriverStreamer for FilesystemDriver {
-    fn write_payload(&self, digest: &str, payload: actix_web::web::Payload, append: bool) -> anyhow::Result<usize> {
-        Ok(tokio::runtime::Handle::current()
-            .block_on(self.write_payload(digest, payload, append))?)
-            
-        /* block_on(|| async {
-            let path = self.get_digest_path(digest);
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .append(append)
-                .create(true)
-                .open(path).await?;
-
-            file.write_all(&bytes).await?;
-
-            Ok(())
-        }); */
-    }
-
     fn supports_streaming(&self) -> bool {
         true
-    }
-
-    fn start_streaming_thread(&self) -> anyhow::Result<()> {
-        todo!()
     }
 
     fn start_stream_channel(&self) -> mpsc::Sender<(String, Bytes)> {
