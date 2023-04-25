@@ -1,5 +1,6 @@
-use actix_web::{HttpResponse, web, get, HttpRequest};
-use qstring::QString;
+use std::sync::Arc;
+
+use axum::{extract::{State, Query}, http::{StatusCode, header, HeaderMap, HeaderName}, response::IntoResponse};
 use serde::{Serialize, Deserialize};
 
 use crate::{app_state::AppState, database::Database};
@@ -10,30 +11,32 @@ pub struct RepositoryList {
     repositories: Vec<String>,
 }
 
-#[get("")]
-pub async fn list_repositories(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    // Get limit and last tag from query params if present.
-    let qs = QString::from(req.query_string());
-    let limit = qs.get("n");
-    let last_repo = qs.get("last");
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListRepositoriesParams {
+    #[serde(rename = "n")]
+    limit: Option<u32>,
 
+    #[serde(rename = "last")]
+    last_repo: Option<String>,
+}
+
+pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> impl IntoResponse {
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
     let database = &state.database;
-    let repositories = match limit {
+    let repositories = match params.limit {
         Some(limit) => {
-            let limit: u32 = limit.parse().unwrap();
 
             // Convert the last param to a String, and list all the repos
-            let last_repo = last_repo.and_then(|t| Some(t.to_string()));
+            let last_repo = params.last_repo.and_then(|t| Some(t.to_string()));
             let repos = database.list_repositories(Some(limit), last_repo).await.unwrap();
 
             // Get the new last repository for the response
             let last_repo = repos.last().and_then(|s| Some(s.clone()));
 
             // Construct the link header
-            let url = req.uri().to_string();
+            let url = crate::REGISTRY_URL;
             let mut url = format!("<{}/v2/_catalog?n={}", url, limit);
             if let Some(last_repo) = last_repo {
                 url += &format!("&limit={}", last_repo);
@@ -54,13 +57,18 @@ pub async fn list_repositories(req: HttpRequest, state: web::Data<AppState>) -> 
     };
     let response_body = serde_json::to_string(&repo_list).unwrap();
     
-    // Construct the response, optionally adding the Link header if it was constructed.
-    let mut resp = HttpResponse::Ok();
-    resp.append_header(("Content-Type", "application/json"));
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
 
     if let Some(link_header) = link_header {
-        resp.append_header(("Link", link_header));
+        headers.insert(header::LINK, link_header.parse().unwrap());
     }
-        
-    resp.body(response_body)
+
+    // Construct the response, optionally adding the Link header if it was constructed.
+    (
+        StatusCode::OK,
+        headers,
+        response_body
+    )
 }

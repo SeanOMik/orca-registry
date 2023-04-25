@@ -1,4 +1,8 @@
-use actix_web::{HttpResponse, web, put, get, head, delete, HttpRequest};
+use std::sync::Arc;
+
+use axum::extract::{Path, State};
+use axum::response::{Response, IntoResponse};
+use axum::http::{StatusCode, HeaderMap, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
@@ -8,10 +12,7 @@ use crate::database::Database;
 use crate::dto::digest::Digest;
 use crate::dto::manifest::Manifest;
 
-#[put("/{reference}")]
-pub async fn upload_manifest(path: web::Path<(String, String)>, body: String, state: web::Data<AppState>) -> HttpResponse {
-    let (name, reference) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, body: String) -> Response {
     // Calculate the sha256 digest for the manifest.
     let calculated_hash = sha256::digest(body.clone());
     let calculated_digest = format!("sha256:{}", calculated_hash);
@@ -40,23 +41,20 @@ pub async fn upload_manifest(path: web::Path<(String, String)>, body: String, st
                 debug!("Linked manifest {} to layer {}", calculated_digest, image.config.digest);
             }
 
-            HttpResponse::Created()
-                .append_header(("Docker-Content-Digest", calculated_digest))
-                .finish()
+            (
+                StatusCode::CREATED,
+                [ (HeaderName::from_static("docker-content-digest"), calculated_digest) ]
+            ).into_response()
         },
         Manifest::List(_list) => {
             warn!("ManifestList request was received!");
 
-            HttpResponse::NotImplemented()
-                .finish()
+            StatusCode::NOT_IMPLEMENTED.into_response()
         }
     }
 }
 
-#[get("/{reference}")]
-pub async fn pull_manifest(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
-    let (name, reference) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
         true => reference.clone(),
@@ -65,8 +63,7 @@ pub async fn pull_manifest(path: web::Path<(String, String)>, state: web::Data<A
             if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
                 tag.manifest_digest
             } else {
-                return HttpResponse::NotFound()
-                    .finish();
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
     };
@@ -76,23 +73,24 @@ pub async fn pull_manifest(path: web::Path<(String, String)>, state: web::Data<A
         debug!("Failed to get manifest in repo {}, for digest {}", name, digest);
         // The digest that was provided in the request was invalid.
         // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
-        return HttpResponse::NotFound()
-            .finish();
+        return StatusCode::NOT_FOUND.into_response();
     }
     let manifest_content = manifest_content.unwrap();
 
-    HttpResponse::Ok()
-        .append_header(("Docker-Content-Digest", digest))
-        .append_header(("Content-Type", "application/vnd.docker.distribution.manifest.v2+json"))
-        .append_header(("Accept", "application/vnd.docker.distribution.manifest.v2+json"))
-        .append_header(("Docker-Distribution-API-Version", "registry/2.0"))
-        .body(manifest_content)
+    (
+        StatusCode::OK,
+        [
+            (HeaderName::from_static("docker-content-digest"), digest),
+            (header::CONTENT_TYPE, "application/vnd.docker.distribution.manifest.v2+json".to_string()),
+            (header::CONTENT_LENGTH, manifest_content.len().to_string()),
+            (header::ACCEPT, "application/vnd.docker.distribution.manifest.v2+json".to_string()),
+            (HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string()),
+        ],
+        manifest_content
+    ).into_response()
 }
 
-#[head("/{reference}")]
-pub async fn manifest_exists(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
-    let (name, reference) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
     // Get the digest from the reference path.
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
@@ -101,8 +99,7 @@ pub async fn manifest_exists(path: web::Path<(String, String)>, state: web::Data
             if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
                 tag.manifest_digest
             } else {
-                return HttpResponse::NotFound()
-                    .finish();
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
     };
@@ -111,33 +108,31 @@ pub async fn manifest_exists(path: web::Path<(String, String)>, state: web::Data
     if manifest_content.is_none() {
         // The digest that was provided in the request was invalid.
         // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
-        return HttpResponse::NotFound()
-            .finish();
+        return StatusCode::NOT_FOUND.into_response();
     }
     let manifest_content = manifest_content.unwrap();
 
-    HttpResponse::Ok()
-        .append_header(("Docker-Content-Digest", digest))
-        .append_header(("Content-Type", "application/vnd.docker.distribution.manifest.v2+json"))
-        .append_header(("Content-Length", manifest_content.len()))
-        .append_header(("Docker-Distribution-API-Version", "registry/2.0"))
-        .body(manifest_content)
+    (
+        StatusCode::OK,
+        [
+            (HeaderName::from_static("docker-content-digest"), digest),
+            (header::CONTENT_TYPE, "application/vnd.docker.distribution.manifest.v2+json".to_string()),
+            (header::CONTENT_LENGTH, manifest_content.len().to_string()),
+            (HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string()),
+        ],
+        manifest_content
+    ).into_response()
 }
 
-#[delete("/{reference}")]
-pub async fn delete_manifest(path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    let (name, reference) = (path.0.to_owned(), path.1.to_owned());
-
-    let headers = req.headers();
-    let _authorization = headers.get("Authorization").unwrap(); // TODO:
+pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, headers: HeaderMap, state: State<Arc<AppState>>) -> Response {
+    let _authorization = headers.get("Authorization").unwrap(); // TODO: use authorization header
 
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
         true => {
             // Check if the manifest exists
             if database.get_manifest(&name, &reference).await.unwrap().is_none() {
-                return HttpResponse::NotFound()
-                    .finish();
+                return StatusCode::NOT_FOUND.into_response();
             }
 
             reference.clone()
@@ -146,15 +141,17 @@ pub async fn delete_manifest(path: web::Path<(String, String)>, req: HttpRequest
             if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
                 tag.manifest_digest
             } else {
-                return HttpResponse::NotFound()
-                    .finish();
+                return StatusCode::NOT_FOUND.into_response();
             }
         }
     };
 
     database.delete_manifest(&name, &digest).await.unwrap();
 
-    HttpResponse::Accepted()
-        .append_header(("Content-Length", "None"))
-        .finish()
+    (
+        StatusCode::ACCEPTED,
+        [
+            (header::CONTENT_LENGTH, "None"),
+        ],
+    ).into_response()
 }

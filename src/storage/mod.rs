@@ -23,7 +23,7 @@ pub trait StorageDriverStreamer {
 }
 
 #[async_trait]
-pub trait StorageDriver: Send + StorageDriverStreamer/* : AsyncWrite + AsyncRead */ {
+pub trait StorageDriver: Send + Sync + StorageDriverStreamer/* : AsyncWrite + AsyncRead */ {
     async fn get_digest(&self, digest: &str) -> anyhow::Result<Option<Bytes>>;
     async fn get_digest_stream(&self, digest: &str) -> anyhow::Result<Option<ByteStream>>;
     async fn digest_length(&self, digest: &str) -> anyhow::Result<Option<usize>>;

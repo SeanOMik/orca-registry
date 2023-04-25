@@ -1,5 +1,6 @@
-use actix_web::{HttpResponse, web, get, HttpRequest};
-use qstring::QString;
+use std::sync::Arc;
+
+use axum::{extract::{Path, Query, State}, response::IntoResponse, http::{StatusCode, header, HeaderMap, HeaderName}};
 use serde::{Serialize, Deserialize};
 
 use crate::{app_state::AppState, database::Database};
@@ -11,32 +12,32 @@ pub struct TagList {
     tags: Vec<String>,
 }
 
-#[get("/list")]
-pub async fn list_tags(path: web::Path<(String, )>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    let name = path.0.to_owned();
-    
-    // Get limit and last tag from query params if present.
-    let qs = QString::from(req.query_string());
-    let limit = qs.get("n");
-    let last_tag = qs.get("last");
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListRepositoriesParams {
+    #[serde(rename = "n")]
+    limit: Option<u32>,
 
+    #[serde(rename = "last")]
+    last_tag: Option<String>,
+}
+
+pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> impl IntoResponse {
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
     let database = &state.database;
-    let tags = match limit {
+    let tags = match params.limit {
         Some(limit) => {
-            let limit: u32 = limit.parse().unwrap();
 
             // Convert the last param to a String, and list all the tags
-            let last_tag = last_tag.and_then(|t| Some(t.to_string()));
+            let last_tag = params.last_tag.and_then(|t| Some(t.to_string()));
             let tags = database.list_repository_tags_page(&name, limit, last_tag).await.unwrap();
 
             // Get the new last repository for the response
             let last_tag = tags.last();
 
             // Construct the link header
-            let url = req.uri().to_string();
+            let url = crate::REGISTRY_URL;
             let mut url = format!("<{}/v2/{}/tags/list?n={}", url, name, limit);
             if let Some(last_tag) = last_tag {
                 url += &format!("&limit={}", last_tag.name);
@@ -57,14 +58,20 @@ pub async fn list_tags(path: web::Path<(String, )>, req: HttpRequest, state: web
         tags: tags.into_iter().map(|t| t.name).collect(),
     };
     let response_body = serde_json::to_string(&tag_list).unwrap();
-    
-    // Construct the response, optionally adding the Link header if it was constructed.
-    let mut resp = HttpResponse::Ok();
-    resp.append_header(("Content-Type", "application/json"));
 
+    // Create headers
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
+
+    // Add the link header if it was constructed
     if let Some(link_header) = link_header {
-        resp.append_header(("Link", link_header));
+        headers.insert(header::LINK, link_header.parse().unwrap());
     }
-        
-    resp.body(response_body)
+
+    (
+        StatusCode::OK,
+        headers,
+        response_body
+    )
 }

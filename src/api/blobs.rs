@@ -1,51 +1,55 @@
-use actix_web::{HttpResponse, get, HttpRequest, web, head, delete};
-use futures::StreamExt;
+use std::sync::Arc;
+
+use axum::body::StreamBody;
+use axum::extract::{State, Path};
+use axum::http::{StatusCode, header, HeaderName};
+use axum::response::{IntoResponse, Response};
+use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
 
-use crate::database::Database;
-use crate::storage::filesystem::FilesystemDriver;
-
-#[head("/{digest}")]
-pub async fn digest_exists(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
-    let (_name, layer_digest) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
     let storage = state.storage.lock().await;
 
     if storage.has_digest(&layer_digest).unwrap() {
         if let Some(size) = storage.digest_length(&layer_digest).await.unwrap() {
-            return HttpResponse::Ok()
-                .insert_header(("Content-Length", size))
-                .insert_header(("Docker-Content-Digest", layer_digest))
-                .finish();
+            return (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_LENGTH, size.to_string()),
+                    (HeaderName::from_static("docker-content-digest"), layer_digest)
+                ]
+            ).into_response();
         }
     }
 
-    HttpResponse::NotFound()
-        .finish()
+    StatusCode::NOT_FOUND.into_response()
 }
 
-#[get("/{digest}")]
-pub async fn pull_digest(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
-    let (_name, layer_digest) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
     let storage = state.storage.lock().await;
-
 
     if let Some(len) = storage.digest_length(&layer_digest).await.unwrap() {
         let stream = storage.stream_bytes(&layer_digest).await.unwrap().unwrap();
 
-        HttpResponse::Ok()
-            .insert_header(("Content-Length", len))
-            .insert_header(("Docker-Content-Digest", layer_digest))
-            .streaming(stream)
+        // convert the `AsyncRead` into a `Stream`
+        let stream = ReaderStream::new(stream.into_async_read());
+        // convert the `Stream` into an `axum::body::HttpBody`
+        let body = StreamBody::new(stream);
+
+        (
+            StatusCode::OK,
+            [
+                (header::CONTENT_LENGTH, len.to_string()),
+                (HeaderName::from_static("docker-content-digest"), layer_digest)
+            ],
+            body
+        ).into_response()
     } else {
-        HttpResponse::NotFound()
-            .finish()
+        StatusCode::NOT_FOUND.into_response()
     }
 }
 
-#[delete("/{digest}")]
-pub async fn delete_digest(_req: HttpRequest, _state: web::Data<AppState>) -> HttpResponse {
+pub async fn delete_digest(state: State<Arc<AppState>>) -> impl IntoResponse {
     todo!()
 }

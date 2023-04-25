@@ -1,20 +1,19 @@
-use actix_web::{HttpResponse, HttpRequest, post, web, patch, put, delete, get};
-use bytes::{BytesMut, Bytes, BufMut};
-use futures::{StreamExt, TryStreamExt};
-use qstring::QString;
-use tokio::io::AsyncWriteExt;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use axum::http::{StatusCode, header, HeaderName};
+use axum::extract::{Path, BodyStream, State, Query};
+use axum::response::{IntoResponse, Response};
+
+use bytes::{Bytes, BytesMut};
+use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
 
-use crate::database::Database;
-use crate::storage::{StorageDriver, StorageDriverStreamer};
-
 /// Starting an upload
-#[post("/")]
-pub async fn start_upload(path: web::Path<(String, )>) -> HttpResponse {
+pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> impl IntoResponse {
     debug!("Upload starting");
-    let name = path.0.to_owned();
     let uuid = uuid::Uuid::new_v4();
 
     debug!("Requesting upload of image {}, generated uuid: {}", name, uuid);
@@ -22,24 +21,22 @@ pub async fn start_upload(path: web::Path<(String, )>) -> HttpResponse {
     let location = format!("/v2/{}/blobs/uploads/{}", name, uuid.to_string());
     debug!("Constructed upload url: {}", location);
 
-    HttpResponse::Accepted()
-        .insert_header(("Location", location))
-        .finish()
+    (
+        StatusCode::ACCEPTED,
+        [ (header::LOCATION, location) ]
+    )
 }
 
-#[patch("/{uuid}")]
-pub async fn chunked_upload_layer(mut payload: web::Payload, path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    let full_uri = req.uri().to_string();
-    let (_name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, mut body: BodyStream) -> Response {
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await.unwrap();
 
-    let written_size = match storage.supports_streaming() {
+    let written_size = match /* storage.supports_streaming() */ false {
         true => {
+            // TODO: Make less bad
             let sender = storage.start_stream_channel();
             let mut written_size = 0;
-            while let Some(item) = payload.next().await {
+            while let Some(item) = body.next().await {
                 if let Ok(bytes) = item {
                     written_size += bytes.len();
                     sender.send((layer_uuid.clone(), bytes)).await.unwrap();
@@ -51,8 +48,8 @@ pub async fn chunked_upload_layer(mut payload: web::Payload, path: web::Path<(St
         false => {
             warn!("This storage driver does not support streaming! This means high memory usage during image pushes!");
 
-            let mut bytes = web::BytesMut::new();
-            while let Some(item) = payload.next().await {
+            let mut bytes = BytesMut::new();
+            while let Some(item) = body.next().await {
                 bytes.extend_from_slice(&item.unwrap());
             }
 
@@ -68,20 +65,20 @@ pub async fn chunked_upload_layer(mut payload: web::Payload, path: web::Path<(St
         (0, written_size)
     };
 
-    HttpResponse::Accepted()
-        .insert_header(("Location", full_uri))
-        .insert_header(("Range", format!("{}-{}", starting, ending)))
-        .insert_header(("Content-Length", 0))
-        .insert_header(("Docker-Upload-UUID", layer_uuid))
-        .finish()
+    let full_uri = format!("{}/v2/{}/blobs/uploads/{}", crate::REGISTRY_URL, name, layer_uuid);
+    (
+        StatusCode::ACCEPTED,
+        [
+            (header::LOCATION, full_uri),
+            (header::RANGE, format!("{}-{}", starting, ending)),
+            (header::CONTENT_LENGTH, "0".to_string()),
+            (HeaderName::from_static("docker-upload-uuid"), layer_uuid)
+        ]
+    ).into_response()
 }
 
-#[put("/{uuid}")]
-pub async fn finish_chunked_upload(body: Bytes, path: web::Path<(String, String)>, req: HttpRequest, state: web::Data<AppState>) -> HttpResponse {
-    let (name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
-
-    let qs = QString::from(req.query_string());
-    let digest = qs.get("digest").unwrap();
+pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, state: State<Arc<AppState>>, body: Bytes) -> impl IntoResponse {
+    let digest = query.get("digest").unwrap();
 
     let storage = state.storage.lock().await;
     if !body.is_empty() {
@@ -93,35 +90,34 @@ pub async fn finish_chunked_upload(body: Bytes, path: web::Path<(String, String)
     storage.replace_digest(&layer_uuid, &digest).await.unwrap();
     debug!("Completed upload, finished uuid {} to digest {}", layer_uuid, digest);
 
-    HttpResponse::Created()
-        .insert_header(("Location", format!("/v2/{}/blobs/{}", name, digest)))
-        .insert_header(("Content-Length", 0))
-        .insert_header(("Docker-Upload-Digest", digest))
-        .finish()
+    (
+        StatusCode::CREATED,
+        [
+            (header::LOCATION, format!("/v2/{}/blobs/{}", name, digest)),
+            (header::CONTENT_LENGTH, "0".to_string()),
+            (HeaderName::from_static("docker-upload-digest"), digest.to_owned())
+        ]
+    )
 }
 
-#[delete("/{uuid}")]
-pub async fn cancel_upload(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
-    let (_name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
-
+pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> impl IntoResponse {
     let storage = state.storage.lock().await;
     storage.delete_digest(&layer_uuid).await.unwrap();
     
     // I'm not sure what this response should be, its not specified in the registry spec.
-    HttpResponse::Ok()
-        .finish()
+    StatusCode::OK
 }
 
-#[get("/{uuid}")]
-pub async fn check_upload_status(path: web::Path<(String, String)>, state: web::Data<AppState>) -> HttpResponse {
-    let (name, layer_uuid) = (path.0.to_owned(), path.1.to_owned());
-    
+pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> impl IntoResponse {
     let storage = state.storage.lock().await;
     let ending = storage.digest_length(&layer_uuid).await.unwrap().unwrap_or(0);
 
-    HttpResponse::Created()
-        .insert_header(("Location", format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)))
-        .insert_header(("Range", format!("0-{}", ending)))
-        .insert_header(("Docker-Upload-Digest", layer_uuid))
-        .finish()
+    (
+        StatusCode::CREATED,
+        [
+            (header::LOCATION, format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)),
+            (header::RANGE, format!("0-{}", ending)),
+            (HeaderName::from_static("docker-upload-digest"), layer_uuid)
+        ]
+    )
 }

@@ -36,3 +36,8 @@ pin-project-lite = "0.2.9"
 anyhow = "1.0.70"
 async-stream = "0.3.5"
 actix-rt = "2.8.0"
+axum = "0.6.16"
+axum-macros = "0.3.7"
+
+tower-http = { version = "0.4.0", features = [ "trace", "normalize-path" ] }
+tower-layer = { version = "0.3.2" }
