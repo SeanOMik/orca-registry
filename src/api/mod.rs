@@ -1,5 +1,5 @@
 use axum::response::IntoResponse;
-use axum::http::{StatusCode, header, HeaderName};
+use axum::http::{StatusCode, HeaderName};
 
 pub mod blobs;
 pub mod uploads;

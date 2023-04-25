@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::sync::Arc;
 
 use axum::http::{StatusCode, header, HeaderName};
@@ -10,6 +11,7 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
+use crate::byte_stream::ByteStream;
 
 /// Starting an upload
 pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> impl IntoResponse {
@@ -31,19 +33,22 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await.unwrap();
 
-    let written_size = match /* storage.supports_streaming() */ false {
+    let written_size = match storage.supports_streaming().await {
         true => {
-            // TODO: Make less bad
-            let sender = storage.start_stream_channel();
-            let mut written_size = 0;
-            while let Some(item) = body.next().await {
-                if let Ok(bytes) = item {
-                    written_size += bytes.len();
-                    sender.send((layer_uuid.clone(), bytes)).await.unwrap();
+            // ByteStream takes a stream of Item, io::Error so this stream needs to be converted to that
+            let io_stream = async_stream::stream! {
+                while let Some(bytes) = body.next().await {
+                    yield match bytes {
+                        Ok(b) => Ok(b),
+                        Err(e) => Err(std::io::Error::new(ErrorKind::Other, e))
+                    };
                 }
-            }
+            };
 
-            written_size
+            let byte_stream = ByteStream::new(io_stream);
+            let len = storage.save_digest_stream(&layer_uuid, byte_stream, true).await.unwrap();
+
+            len
         },
         false => {
             warn!("This storage driver does not support streaming! This means high memory usage during image pushes!");
@@ -100,7 +105,7 @@ pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, S
     )
 }
 
-pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn cancel_upload_delete(Path((_name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> impl IntoResponse {
     let storage = state.storage.lock().await;
     storage.delete_digest(&layer_uuid).await.unwrap();
     

@@ -8,16 +8,12 @@ mod byte_stream;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use actix_web::{web, App, HttpServer};
-use actix_web::middleware::Logger;
-
 use axum::{Router, routing};
 use axum::ServiceExt;
 use tower_layer::Layer;
 
-use bytes::Bytes;
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
 use tracing::{debug, Level};
 
@@ -25,7 +21,7 @@ use app_state::AppState;
 use database::Database;
 
 use crate::storage::StorageDriver;
-use crate::storage::filesystem::{FilesystemDriver, FilesystemStreamer};
+use crate::storage::filesystem::FilesystemDriver;
 
 use tower_http::trace::TraceLayer;
 
@@ -40,28 +36,13 @@ async fn main() -> std::io::Result<()> {
 
     pool.create_schema().await.unwrap();
 
-    let storage_path = String::from("registry/blobs");
-    let (send, recv) = mpsc::channel::<(String, Bytes)>(50);
-    let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new(storage_path.clone(), send)));
+    let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
 
-    // create the storage streamer
-    /* {
-        let path_clone = storage_path.clone();
-        actix_rt::spawn(async {
-            let mut streamer = FilesystemStreamer::new(path_clone, recv);
-            streamer.start_handling_streams().await.unwrap();
-        });
-    } */
-
-    //let state = web::Data::new(AppState::new(pool, storage_driver));
     let state = Arc::new(AppState::new(pool, storage_driver));
 
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .init();
-
-    // TODO: Make configurable by deployment
-    let payload_config = web::PayloadConfig::new(5 * 1024 * 1024 * 1024); // 5Gb 
 
     let app = NormalizePathLayer::trim_trailing_slash().layer(Router::new()
         .nest("/v2", Router::new()

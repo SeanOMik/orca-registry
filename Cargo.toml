@@ -16,7 +16,6 @@ sqlx = { version = "0.6.3", features = [ "runtime-tokio-rustls", "sqlite" ] }
 bytes = "1.4.0"
 
 chrono = "0.4.23"
-actix-web = "4"
 tokio = { version = "1.21.2", features = [ "fs", "macros" ] }
 tokio-util =  { version = "0.7.7", features = [ "io" ] }
 
@@ -30,12 +29,10 @@ regex = "1.7.1"
 jws = "0.2.7"
 async-trait = "0.1.68"
 futures = "0.3.28"
-qstring = "0.7.2"
 sha256 = "1.1.2"
 pin-project-lite = "0.2.9"
 anyhow = "1.0.70"
 async-stream = "0.3.5"
-actix-rt = "2.8.0"
 axum = "0.6.16"
 axum-macros = "0.3.7"
 

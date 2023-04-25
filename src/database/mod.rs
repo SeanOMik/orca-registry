@@ -1,7 +1,4 @@
-use std::io::Read;
-
 use async_trait::async_trait;
-use bytes::Bytes;
 use sqlx::{Sqlite, Pool};
 use tracing::debug;
 
@@ -16,16 +13,6 @@ pub trait Database {
 
     /// Create the tables in the database
     async fn create_schema(&self) -> sqlx::Result<()>;
-    /// Get the digest bytes
-    /* async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>>;
-    /// Get the length of the digest
-    async fn digest_length(&self, digest: &str) -> sqlx::Result<usize>;
-    /// Save digest bytes
-    async fn save_digest(&self, digest: &str, bytes: &Bytes) -> sqlx::Result<()>;
-    /// Delete digest
-    async fn delete_digest(&self, digest: &str) -> sqlx::Result<()>;
-    /// Replace the uuid with a digest
-    async fn replace_digest(&self, uuid: &str, new_digest: &str) -> sqlx::Result<()>; */
 
     // Tag related functions
 
@@ -70,72 +57,6 @@ impl Database for Pool<Sqlite> {
 
         Ok(())
     }
-
-    /* async fn get_digest(&self, digest: &str) -> sqlx::Result<Option<Bytes>> {
-        // Handle RowNotFound errors
-        let row: (Vec<u8>, ) = match sqlx::query_as("SELECT blob FROM layer_blobs WHERE digest = ?")
-                .bind(digest)
-                .fetch_one(self).await {
-            Ok(row) => row,
-            Err(e) => match e {
-                sqlx::Error::RowNotFound => {
-                    return Ok(None)
-                },
-                _ => {
-                    return Err(e);
-                }
-            }
-        };
-
-        let bytes = Bytes::from(row.0);
-
-        debug!("Got digest {}, {} bytes", digest, bytes.len());
-
-        Ok(Some(bytes))
-    }
-
-    async fn digest_length(&self, digest: &str) -> sqlx::Result<usize> {
-        let row: (i64, ) = sqlx::query_as("SELECT length(blob) FROM layer_blobs WHERE digest = ?")
-            .bind(digest)
-            .fetch_one(self).await?;
-
-        Ok(row.0 as usize)
-    }
-
-    async fn save_digest(&self, digest: &str, bytes: &Bytes) -> sqlx::Result<()> {
-        let bytes_len = bytes.len();
-        let bytes = bytes.bytes().map(|b| b.unwrap()).collect::<Vec<u8>>();
-
-        sqlx::query("INSERT INTO layer_blobs (digest, blob) VALUES (?, ?)")
-            .bind(digest)
-            .bind(bytes)
-            .execute(self).await?;
-
-        debug!("Saved digest {}, {} bytes", digest, bytes_len);
-
-        Ok(())
-    }
-
-    async fn delete_digest(&self, digest: &str) -> sqlx::Result<()> {
-        sqlx::query("DELETE FROM layer_blobs WHERE digest = ?")
-            .bind(digest)
-            .execute(self).await?;
-
-        debug!("Deleted digest {}", digest);
-
-        Ok(())
-    }
-
-    async fn replace_digest(&self, uuid: &str, new_digest: &str) -> sqlx::Result<()> {
-        sqlx::query("UPDATE layer_blobs SET digest = ? WHERE digest = ?")
-            .bind(new_digest)
-            .bind(uuid)
-            .execute(self).await?;
-
-        debug!("Replaced digest uuid {} to digest {}", uuid, new_digest);
-
-        Ok(())
-    } */
 
     async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()> {
         sqlx::query("INSERT INTO manifest_layers(manifest, layer_digest) VALUES (?, ?)")

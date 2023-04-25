@@ -8,10 +8,10 @@ use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
 
-pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
+pub async fn digest_exists_head(Path((_name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
     let storage = state.storage.lock().await;
 
-    if storage.has_digest(&layer_digest).unwrap() {
+    if storage.has_digest(&layer_digest).await.unwrap() {
         if let Some(size) = storage.digest_length(&layer_digest).await.unwrap() {
             return (
                 StatusCode::OK,
@@ -26,11 +26,11 @@ pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
+pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
     let storage = state.storage.lock().await;
 
     if let Some(len) = storage.digest_length(&layer_digest).await.unwrap() {
-        let stream = storage.stream_bytes(&layer_digest).await.unwrap().unwrap();
+        let stream = storage.get_digest_stream(&layer_digest).await.unwrap().unwrap();
 
         // convert the `AsyncRead` into a `Stream`
         let stream = ReaderStream::new(stream.into_async_read());
@@ -50,6 +50,6 @@ pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>,
     }
 }
 
-pub async fn delete_digest(state: State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn delete_digest(_state: State<Arc<AppState>>) -> impl IntoResponse {
     todo!()
 }

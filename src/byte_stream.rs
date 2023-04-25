@@ -14,6 +14,7 @@ pin_project! {
     }
 }
 
+#[allow(dead_code)]
 impl ByteStream {
     /// Create a new `ByteStream` by wrapping a `futures` stream.
     pub fn new<S>(stream: S) -> ByteStream
