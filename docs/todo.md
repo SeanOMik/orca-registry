@@ -1,6 +1,6 @@
-- [ ] slashes in repo names
+- [x] slashes in repo names
 - [ ] Simple auth
 - [ ] postgresql
 - [ ] prometheus metrics
 - [x] streaming layer bytes into providers
-- [ ] streaming layer bytes from providers
+- [x] streaming layer bytes from providers
