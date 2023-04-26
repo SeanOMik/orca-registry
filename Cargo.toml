@@ -38,3 +38,8 @@ axum-macros = "0.3.7"
 
 tower-http = { version = "0.4.0", features = [ "trace", "normalize-path" ] }
 tower-layer = { version = "0.3.2" }
+
+figment = { version = "0.10", features = ["toml", "env"] }
+figment-cliarg-provider = { git = "https://github.com/SeanOMik/figment-cliarg-provider.git", branch = "main" }
+wild = "2.1.0"
+argmap = "1.1.2"

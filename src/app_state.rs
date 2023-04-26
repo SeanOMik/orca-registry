@@ -1,22 +1,23 @@
 use sqlx::{Sqlite, Pool};
 
 use crate::storage::StorageDriver;
+use crate::config::Config;
 
 use tokio::sync::Mutex;
 
 pub struct AppState {
     pub database: Pool<Sqlite>,
     pub storage: Mutex<Box<dyn StorageDriver>>,
+    pub config: Config,
 }
 
 impl AppState {
-    pub fn new/* <S> */(database: Pool<Sqlite>, storage: Mutex<Box<dyn StorageDriver>>) -> Self
-    /* where
-        S: StorageDriver, */
+    pub fn new(database: Pool<Sqlite>, storage: Mutex<Box<dyn StorageDriver>>, config: Config) -> Self
     {
         Self {
             database,
-            storage
+            storage,
+            config,
         }
     }
 }

@@ -4,8 +4,10 @@ mod database;
 mod dto;
 mod storage;
 mod byte_stream;
+mod config;
 
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::http::Request;
@@ -26,9 +28,9 @@ use database::Database;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
-use tower_http::trace::TraceLayer;
+use crate::config::Config;
 
-pub const REGISTRY_URL: &'static str = "http://localhost:3000"; // TODO: Move into configuration or something (make sure it doesn't end in /)
+use tower_http::trace::TraceLayer;
 
 /// Encode the 'name' path parameter in the url
 async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Response {
@@ -62,7 +64,10 @@ async fn main() -> std::io::Result<()> {
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
 
-    let state = Arc::new(AppState::new(pool, storage_driver));
+    let config = Config::new().expect("Failure to parse config!");
+    let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port)).unwrap();
+
+    let state = Arc::new(AppState::new(pool, storage_driver, config));
 
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
@@ -98,9 +103,8 @@ async fn main() -> std::io::Result<()> {
 
     let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    debug!("Starting http server, listening on {}", addr);
-    axum::Server::bind(&addr)
+    debug!("Starting http server, listening on {}", app_addr);
+    axum::Server::bind(&app_addr)
         .serve(layered_app.into_make_service())
         .await
         .unwrap();

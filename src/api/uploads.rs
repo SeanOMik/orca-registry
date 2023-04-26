@@ -70,7 +70,7 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
         (0, written_size)
     };
 
-    let full_uri = format!("{}/v2/{}/blobs/uploads/{}", crate::REGISTRY_URL, name, layer_uuid);
+    let full_uri = format!("{}/v2/{}/blobs/uploads/{}", &state.config.url, name, layer_uuid);
     (
         StatusCode::ACCEPTED,
         [

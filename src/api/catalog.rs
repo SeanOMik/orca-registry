@@ -36,7 +36,7 @@ pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, sta
             let last_repo = repos.last().and_then(|s| Some(s.clone()));
 
             // Construct the link header
-            let url = crate::REGISTRY_URL;
+            let url = &state.config.url;
             let mut url = format!("<{}/v2/_catalog?n={}", url, limit);
             if let Some(last_repo) = last_repo {
                 url += &format!("&limit={}", last_repo);

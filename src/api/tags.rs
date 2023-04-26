@@ -37,7 +37,7 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
             let last_tag = tags.last();
 
             // Construct the link header
-            let url = crate::REGISTRY_URL;
+            let url = &state.config.url;
             let mut url = format!("<{}/v2/{}/tags/list?n={}", url, name, limit);
             if let Some(last_tag) = last_tag {
                 url += &format!("&limit={}", last_tag.name);

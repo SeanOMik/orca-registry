@@ -3,3 +3,4 @@
 .vscode
 test.db
 /registry
+config.toml
