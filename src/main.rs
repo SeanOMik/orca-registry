@@ -6,6 +6,7 @@ mod storage;
 mod byte_stream;
 mod config;
 mod query;
+mod auth_storage;
 
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -88,15 +89,15 @@ async fn main() -> std::io::Result<()> {
         .with_max_level(Level::DEBUG)
         .init();
 
+    let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth_storage::require_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 
     let app = Router::new()
         .route("/auth", routing::get(api::auth::auth_basic_get)
             .post(api::auth::auth_basic_get))
-        .fallback(auth_failure)
         .nest("/v2", Router::new()
             .route("/", routing::get(api::version_check))
-            /* .route("/_catalog", routing::get(api::catalog::list_repositories))
+            .route("/_catalog", routing::get(api::catalog::list_repositories))
             .route("/:name/tags/list", routing::get(api::tags::list_tags))
             .nest("/:name/blobs", Router::new()
                 .route("/:digest", routing::get(api::blobs::pull_digest_get)
@@ -114,7 +115,8 @@ async fn main() -> std::io::Result<()> {
             .route("/:name/manifests/:reference", routing::get(api::manifests::pull_manifest_get)
                 .put(api::manifests::upload_manifest_put)
                 .head(api::manifests::manifest_exists_head)
-                .delete(api::manifests::delete_manifest)) */
+                .delete(api::manifests::delete_manifest))
+            .layer(auth_middleware) // require auth for ALL v2 routes
         )
         .with_state(state)
         .layer(TraceLayer::new_for_http());

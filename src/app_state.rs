@@ -1,5 +1,6 @@
 use sqlx::{Sqlite, Pool};
 
+use crate::auth_storage::MemoryAuthStorage;
 use crate::storage::StorageDriver;
 use crate::config::Config;
 
@@ -9,6 +10,7 @@ pub struct AppState {
     pub database: Pool<Sqlite>,
     pub storage: Mutex<Box<dyn StorageDriver>>,
     pub config: Config,
+    pub auth_storage: Mutex<MemoryAuthStorage>,
 }
 
 impl AppState {
@@ -18,6 +20,7 @@ impl AppState {
             database,
             storage,
             config,
+            auth_storage: Mutex::new(MemoryAuthStorage::new()),
         }
     }
 }

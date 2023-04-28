@@ -1,11 +1,9 @@
 use std::{sync::Arc, collections::{HashMap, BTreeMap}, time::{SystemTime, UNIX_EPOCH}};
 
-use axum::{extract::{Query, State}, response::{IntoResponse, Response}, http::{StatusCode, Request, Method, HeaderName, header}, Form};
+use axum::{extract::{Query, State}, response::{IntoResponse, Response}, http::{StatusCode, header}, Form};
 use axum_auth::AuthBasic;
 use chrono::{DateTime, Utc};
-use qstring::QString;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{debug, error, info, span, Level};
 
 use hmac::{Hmac, Mac};
@@ -14,7 +12,7 @@ use sha2::Sha256;
 
 use rand::Rng;
 
-use crate::{dto::scope::Scope, app_state::AppState, query::Qs};
+use crate::{dto::scope::Scope, app_state::AppState};
 
 #[derive(Deserialize, Debug)]
 pub struct TokenAuthRequest {
@@ -178,6 +176,9 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
         };
 
         let json_str = serde_json::to_string(&auth_response).unwrap();
+
+        let mut auth_storage = state.auth_storage.lock().await;
+        auth_storage.valid_tokens.insert(token_str.clone());
 
         return (
             StatusCode::OK,
