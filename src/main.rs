@@ -17,6 +17,7 @@ use axum::middleware::Next;
 use axum::response::{Response, IntoResponse};
 use axum::{Router, routing};
 use axum::ServiceExt;
+use bcrypt::Version;
 use tower_layer::Layer;
 
 use sqlx::sqlite::SqlitePoolOptions;

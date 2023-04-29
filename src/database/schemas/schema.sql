@@ -8,11 +8,6 @@ CREATE TABLE IF NOT EXISTS image_manifests (
     content TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS layer_blobs (
-    digest TEXT NOT NULL PRIMARY KEY,
-    blob BYTEA NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS image_tags (
     name TEXT NOT NULL,
     repository TEXT NOT NULL,
@@ -25,4 +20,11 @@ CREATE TABLE IF NOT EXISTS manifest_layers (
     manifest TEXT NOT NULL,
     layer_digest TEXT NOT NULL,
     PRIMARY KEY (manifest, layer_digest)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT NOT NULL UNIQUE PRIMARY KEY,
+    email TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL
 );

@@ -4,7 +4,7 @@ use tracing::debug;
 
 use chrono::{DateTime, Utc, NaiveDateTime};
 
-use crate::dto::Tag;
+use crate::dto::{Tag, user::User};
 
 #[async_trait]
 pub trait Database {
@@ -45,6 +45,11 @@ pub trait Database {
     /// List all repositories. 
     /// If limit is not specified, a default limit of 1000 will be returned.
     async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> sqlx::Result<Vec<String>>;
+
+
+    /// User stuff
+    async fn create_user(&self, username: String, email: String, password_hash: String, password_salt: String) -> sqlx::Result<User>;
+    async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool>;
 }
 
 #[async_trait]
@@ -250,5 +255,27 @@ impl Database for Pool<Sqlite> {
         let repos: Vec<String> = rows.into_iter().map(|row| row.0).collect();
 
         Ok(repos)
+    }
+
+    async fn create_user(&self, username: String, email: String, password_hash: String, password_salt: String) -> sqlx::Result<User> {
+        let username = username.to_lowercase();
+        let email = email.to_lowercase();
+        sqlx::query("INSERT INTO users (username, email, password_hash, password_salt) VALUES (?, ?, ?, ?)")
+            .bind(username.clone())
+            .bind(email.clone())
+            .bind(password_hash)
+            .bind(password_salt)
+            .execute(self).await?;
+
+        Ok(User::new(username, email))
+    }
+
+    async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool> {
+        let username = username.to_lowercase();
+        let row: (String, ) = sqlx::query_as("SELECT password_hash FROM users WHERE username = ?")
+            .bind(username)
+            .fetch_one(self).await?;
+
+        Ok(bcrypt::verify(password, &row.0)?)
     }
 }

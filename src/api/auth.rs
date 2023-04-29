@@ -13,6 +13,7 @@ use sha2::Sha256;
 use rand::Rng;
 
 use crate::{dto::scope::Scope, app_state::AppState};
+use crate::database::Database;
 
 #[derive(Deserialize, Debug)]
 pub struct TokenAuthRequest {
@@ -158,7 +159,18 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
     debug!("Constructed auth request");
 
-    if let Some(account) = auth.account {
+    if let (Some(account), Some(password)) = (auth.account, auth.password) {
+        // Ensure that the password is correct
+        let database = &state.database;
+        if !database.verify_user_login(account.clone(), password).await.unwrap() {
+            debug!("Authentication failed, incorrect password!");
+            return (
+                StatusCode::UNAUTHORIZED
+            ).into_response();
+        }
+        drop(database);
+        debug!("User password is correct");
+
         let now = SystemTime::now();
         let token_str = create_jwt_token(account).unwrap();
 

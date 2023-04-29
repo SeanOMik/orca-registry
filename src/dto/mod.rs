@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 pub mod manifest;
 pub mod digest;
 pub mod scope;
+pub mod user;
 
 #[derive(Debug)]
 pub struct Tag {
