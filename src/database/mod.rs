@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use sqlx::{Sqlite, Pool};
 use tracing::debug;
 
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::{DateTime, Utc, NaiveDateTime, TimeZone};
 
-use crate::dto::{Tag, user::User};
+use crate::dto::{Tag, user::{User, RepositoryPermissions, RegistryUserType, Permission, UserAuth, TokenInfo}, RepositoryVisibility};
 
 #[async_trait]
 pub trait Database {
@@ -40,8 +40,10 @@ pub trait Database {
 
     // Repository related functions
 
+    async fn has_repository(&self, repository: &str) -> sqlx::Result<bool>;
+    async fn get_repository_visibility(&self, repository: &str) -> anyhow::Result<Option<RepositoryVisibility>>;
     /// Create a repository
-    async fn save_repository(&self, repository: &str) -> sqlx::Result<()>;
+    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> sqlx::Result<()>;
     /// List all repositories. 
     /// If limit is not specified, a default limit of 1000 will be returned.
     async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> sqlx::Result<Vec<String>>;
@@ -50,6 +52,11 @@ pub trait Database {
     /// User stuff
     async fn create_user(&self, username: String, email: String, password_hash: String, password_salt: String) -> sqlx::Result<User>;
     async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool>;
+    async fn get_user_registry_type(&self, username: String) -> anyhow::Result<Option<RegistryUserType>>;
+    async fn get_user_repo_permissions(&self, username: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>>;
+    async fn get_user_registry_usertype(&self, username: String) -> anyhow::Result<Option<RegistryUserType>>;
+    async fn store_user_token(&self, token: String, username: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()>;
+    async fn verify_user_token(&self, token: String) -> anyhow::Result<Option<UserAuth>>;
 }
 
 #[async_trait]
@@ -127,6 +134,7 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn get_tag(&self, repository: &str, tag: &str) -> sqlx::Result<Option<Tag>> {
+        debug!("get tag");
         let row: (String, i64, ) = match sqlx::query_as("SELECT image_manifest, last_updated FROM image_tags WHERE name = ? AND repository = ?")
                 .bind(tag)
                 .bind(repository)
@@ -159,7 +167,7 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn delete_tag(&self, repository: &str, tag: &str) -> sqlx::Result<()> {
-        sqlx::query("DELETE FROM image_tags WHERE name = ? AND repository = ?")
+        sqlx::query("DELETE FROM image_tags WHERE 'name' = ? AND repository = ?")
             .bind(tag)
             .bind(repository)
             .execute(self).await?;
@@ -224,11 +232,67 @@ impl Database for Pool<Sqlite> {
         Ok(digests)
     }
 
-    async fn save_repository(&self, repository: &str) -> sqlx::Result<()> {
-        sqlx::query("INSERT INTO repositories (name) VALUES (?)")
-            .bind(repository)
-            .execute(self).await?;
-        
+    async fn has_repository(&self, repository: &str) -> sqlx::Result<bool> {
+        debug!("before query ig");
+        let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) repositories WHERE 'name' = ?")
+                .bind(repository)
+                .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(false)
+                },
+                _ => {
+                    return Err(e);
+                }
+            }
+        };
+
+        Ok(row.0 > 0)
+    }
+
+    async fn get_repository_visibility(&self, repository: &str) -> anyhow::Result<Option<RepositoryVisibility>> {
+        let row: (u32, ) = match sqlx::query_as("SELECT visibility FROM repositories WHERE 'name' = ?")
+                .bind(repository)
+                .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        Ok(Some(RepositoryVisibility::try_from(row.0)?))
+    }
+
+    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> sqlx::Result<()> {
+        // ensure that the repository was not already created
+        if self.has_repository(repository).await? {
+            debug!("repo exists");
+            return Ok(());
+        }
+        debug!("repo does not exist");
+
+        match owning_project {
+            Some(owner) => {
+                sqlx::query("INSERT INTO repositories (name, visibility, owning_project) VALUES (?, ?, ?)")
+                    .bind(repository)
+                    .bind(visibility as u32)
+                    .bind(owner)
+                    .execute(self).await?;
+            },
+            None => {
+                sqlx::query("INSERT INTO repositories (name, visibility) VALUES (?, ?)")
+                    .bind(repository)
+                    .bind(visibility as u32)
+                    .execute(self).await?;
+            }
+        }
+
         Ok(())
     }
 
@@ -277,5 +341,96 @@ impl Database for Pool<Sqlite> {
             .fetch_one(self).await?;
 
         Ok(bcrypt::verify(password, &row.0)?)
+    }
+
+    async fn get_user_registry_type(&self, username: String) -> anyhow::Result<Option<RegistryUserType>> {
+        let username = username.to_lowercase();
+        
+        let row: (u32, ) = match sqlx::query_as("SELECT user_type FROM user_registry_permissions WHERE username = ?")
+                .bind(username)
+                .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        Ok(Some(RegistryUserType::try_from(row.0)?))
+    }
+
+    async fn get_user_repo_permissions(&self, username: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>> {
+        let username = username.to_lowercase();
+        
+        let row: (u32, ) = match sqlx::query_as("SELECT repository_permissions FROM user_repo_permissions WHERE username = ? AND repository_name = ?")
+                .bind(username.clone())
+                .bind(repository.clone())
+                .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        let vis = self.get_repository_visibility(&repository).await?.unwrap();
+
+        // Also get the user type for the registry, if its admin return admin repository permissions
+        let utype = self.get_user_registry_usertype(username).await?.unwrap(); // unwrap should be safe
+        if utype == RegistryUserType::Admin {
+            Ok(Some(RepositoryPermissions::new(Permission::ADMIN.bits(), vis)))
+        } else {
+            Ok(Some(RepositoryPermissions::new(row.0, vis)))
+        }
+    }
+
+    async fn get_user_registry_usertype(&self, username: String) -> anyhow::Result<Option<RegistryUserType>> {
+        let username = username.to_lowercase();
+        let row: (u32, ) = sqlx::query_as("SELECT user_type FROM user_registry_permissions WHERE username = ?")
+            .bind(username)
+            .fetch_one(self).await?;
+
+        Ok(Some(RegistryUserType::try_from(row.0)?))
+    }
+
+    async fn store_user_token(&self, token: String, username: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()> {
+        let username = username.to_lowercase();
+        let expiry = expiry.timestamp();
+        let created_at = created_at.timestamp();
+        sqlx::query("INSERT INTO user_tokens (token, username, expiry, created_at) VALUES (?, ?, ?, ?)")
+            .bind(token)
+            .bind(username)
+            .bind(expiry)
+            .bind(created_at)
+            .execute(self).await?;
+
+        Ok(())
+    }
+    
+    async fn verify_user_token(&self, token: String) -> anyhow::Result<Option<UserAuth>> {
+        let token_row: (String, i64, i64, ) = sqlx::query_as("SELECT username, expiry, created_at FROM user_tokens WHERE token = ?")
+            .bind(token.clone())
+            .fetch_one(self).await?;
+
+        let (username, expiry, created_at) = (token_row.0, token_row.1, token_row.2);
+
+        let user_row: (String, ) = sqlx::query_as("SELECT email FROM users WHERE username = ?")
+            .bind(username.clone())
+            .fetch_one(self).await?;
+
+        let (expiry, created_at) = (Utc.timestamp_millis_opt(expiry).unwrap(), Utc.timestamp_millis_opt(created_at).unwrap());
+        let user = User::new(username, user_row.0);
+        let token = TokenInfo::new(token, expiry, created_at);
+        let auth = UserAuth::new(user, token);
+
+        Ok(Some(auth))
     }
 }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::body::StreamBody;
 use axum::extract::{State, Path};
 use axum::http::{StatusCode, header, HeaderName};
@@ -7,8 +8,23 @@ use axum::response::{IntoResponse, Response};
 use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
+use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response};
+use crate::database::Database;
+use crate::dto::RepositoryVisibility;
+use crate::dto::user::{Permission, RegistryUserType, UserAuth};
 
-pub async fn digest_exists_head(Path((_name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
+pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+    // Check if the user has permission to pull, or that the repository is public
+    let database = &state.database;
+    if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
+            && !database.get_repository_visibility(&name).await.unwrap()
+            .and_then(|v| Some(v == RepositoryVisibility::Public))
+            .unwrap_or_else(|| false) {
+        
+        return get_unauthenticated_response(&state.config);
+    }
+    drop(database);
+
     let storage = state.storage.lock().await;
 
     if storage.has_digest(&layer_digest).await.unwrap() {
@@ -26,7 +42,18 @@ pub async fn digest_exists_head(Path((_name, layer_digest)): Path<(String, Strin
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Response {
+pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+    // Check if the user has permission to pull, or that the repository is public
+    let database = &state.database;
+    if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
+            && !database.get_repository_visibility(&name).await.unwrap()
+            .and_then(|v| Some(v == RepositoryVisibility::Public))
+            .unwrap_or_else(|| false) {
+        
+        return get_unauthenticated_response(&state.config);
+    }
+    drop(database);
+
     let storage = state.storage.lock().await;
 
     if let Some(len) = storage.digest_length(&layer_digest).await.unwrap() {

@@ -57,20 +57,6 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resp
     next.run(request).await
 }
 
-pub async fn auth_failure() -> impl IntoResponse {
-    let bearer = format!("Bearer realm=\"http://localhost:3000/token\"");
-
-    (
-        StatusCode::UNAUTHORIZED,
-        
-        [
-            ( header::WWW_AUTHENTICATE, bearer ),
-            ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
-        ]
-    ).into_response()
-    //StatusCode::UNAUTHORIZED
-}
-
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let pool = SqlitePoolOptions::new()

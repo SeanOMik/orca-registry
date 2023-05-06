@@ -23,3 +23,27 @@ impl Tag {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RepositoryVisibility {
+    Private = 0,
+    Public = 1
+}
+
+impl TryFrom<u32> for RepositoryVisibility {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Private),
+            1 => Ok(Self::Public),
+            _ => Err(anyhow::anyhow!("Invalid value for RepositoryVisibility: `{}`", value)),
+        }
+    }
+}
+
+impl Into<u32> for RepositoryVisibility {
+    fn into(self) -> u32 {
+        self as u32
+    }
+}

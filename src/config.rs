@@ -8,7 +8,7 @@ use std::env;
 pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
-    pub url: String,
+    pub url: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -37,11 +37,19 @@ impl Config {
             .join(Toml::file(format!("{}", path)));
 
         let mut config: Config = figment.extract()?;
-
-        if config.url.ends_with("/") {
-            config.url = config.url[..config.url.len() - 1].to_string();
+        if let Some(url) = config.url.as_mut() {
+            if url.ends_with("/") {
+                *url = url[..url.len() - 1].to_string();
+            }
         }
         
         Ok(config)
+    }
+
+    pub fn get_url(&self) -> String {
+        match &self.url {
+            Some(u) => u.clone(),
+            None => format!("http://{}:{}", self.listen_address, self.listen_port)
+        }
     }
 }

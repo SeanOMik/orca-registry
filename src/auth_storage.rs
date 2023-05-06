@@ -1,10 +1,11 @@
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
-use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Request}, middleware::Next, response::{Response, IntoResponse}};
+use axum::{extract::{State, Path}, http::{StatusCode, HeaderMap, header, HeaderName, Request}, middleware::Next, response::{Response, IntoResponse}};
 
 use tracing::debug;
 
-use crate::app_state::AppState;
+use crate::{app_state::AppState, dto::user::{Permission, RegistryUserType}, config::Config};
+use crate::database::Database;
 
 /// Temporary struct for storing auth information in memory.
 pub struct MemoryAuthStorage {
@@ -33,7 +34,7 @@ impl Deref for AuthToken {
 type Rejection = (StatusCode, HeaderMap);
 
 pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Request<B>, next: Next<B>) -> Result<Response, Rejection> {
-    let bearer = format!("Bearer realm=\"http://localhost:3000/auth\"");
+    let bearer = format!("Bearer realm=\"{}/auth\"", state.config.get_url());
     let mut failure_headers = HeaderMap::new();
     failure_headers.append(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
     failure_headers.append(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
@@ -43,7 +44,7 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
         .ok_or((StatusCode::UNAUTHORIZED, failure_headers.clone()))?
         .to_str()
         .map_err(|_| (StatusCode::UNAUTHORIZED, failure_headers.clone()))?
-    ); // TODO: Don't unwrap
+    );
 
     let token = match auth.split_once(' ') {
         Some((auth, token)) if auth == "Bearer" => token,
@@ -53,23 +54,46 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
     };
 
     // If the token is not valid, return an unauthorized response
-    let auth_storage = state.auth_storage.lock().await;
-    if !auth_storage.valid_tokens.contains(token) {
-        let bearer = format!("Bearer realm=\"http://localhost:3000/auth\"");
-        return Ok((
+    let database = &state.database;
+    if let Some(user) = database.verify_user_token(token.to_string()).await.unwrap() {
+        debug!("Authenticated user through middleware: {}", user.user.username);
+
+        request.extensions_mut().insert(user);
+
+        Ok(next.run(request).await)
+    } else {
+        let bearer = format!("Bearer realm=\"{}/auth\"", state.config.get_url());
+        Ok((
             StatusCode::UNAUTHORIZED,
             [
                 ( header::WWW_AUTHENTICATE, bearer ),
                 ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
             ]
-        ).into_response());
-
-    } else {
-        debug!("Client successfully authenticated!");
+        ).into_response())
     }
-    drop(auth_storage);
+}
 
-    request.extensions_mut().insert(AuthToken(String::from(token)));
+pub async fn does_user_have_permission(database: &impl Database, username: String, repository: String, permission: Permission) -> sqlx::Result<bool> {
+    let allowed_to = {
+        match database.get_user_registry_type(username.clone()).await.unwrap() {
+            Some(RegistryUserType::Admin) => true,
+            _ => match database.get_user_repo_permissions(username, repository).await.unwrap() {
+                Some(perms) => if perms.has_permission(permission) { true } else { false },
+                _ => false,
+            }
+        }
+    };
 
-    Ok(next.run(request).await)
+    Ok(allowed_to)
+}
+
+pub fn get_unauthenticated_response(config: &Config) -> Response {
+    let bearer = format!("Bearer realm=\"{}/auth\"", config.get_url());
+    (
+        StatusCode::UNAUTHORIZED,
+        [
+            ( header::WWW_AUTHENTICATE, bearer ),
+            ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
+        ]
+    ).into_response()
 }

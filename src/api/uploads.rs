@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::http::{StatusCode, header, HeaderName};
 use axum::extract::{Path, BodyStream, State, Query};
 use axum::response::{IntoResponse, Response};
@@ -11,25 +12,36 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
+use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response};
 use crate::byte_stream::ByteStream;
+use crate::database::Database;
+use crate::dto::user::{UserAuth, Permission, RegistryUser, RegistryUserType};
 
 /// Starting an upload
-pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> impl IntoResponse {
-    debug!("Upload starting");
-    let uuid = uuid::Uuid::new_v4();
+pub async fn start_upload_post(Path((name, )): Path<(String, )>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>) -> Response {
+    if does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
+        debug!("Upload requested");
+        let uuid = uuid::Uuid::new_v4();
 
-    debug!("Requesting upload of image {}, generated uuid: {}", name, uuid);
+        debug!("Requesting upload of image {}, generated uuid: {}", name, uuid);
 
-    let location = format!("/v2/{}/blobs/uploads/{}", name, uuid.to_string());
-    debug!("Constructed upload url: {}", location);
+        let location = format!("/v2/{}/blobs/uploads/{}", name, uuid.to_string());
+        debug!("Constructed upload url: {}", location);
 
-    (
-        StatusCode::ACCEPTED,
-        [ (header::LOCATION, location) ]
-    )
+        return (
+            StatusCode::ACCEPTED,
+            [ (header::LOCATION, location) ]
+        ).into_response();
+    }
+
+    get_unauthenticated_response(&state.config)
 }
 
-pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, mut body: BodyStream) -> Response {
+pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, mut body: BodyStream) -> Response {
+    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
+        return get_unauthenticated_response(&state.config);
+    }
+
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await.unwrap();
 
@@ -70,7 +82,7 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
         (0, written_size)
     };
 
-    let full_uri = format!("{}/v2/{}/blobs/uploads/{}", &state.config.url, name, layer_uuid);
+    let full_uri = format!("{}/v2/{}/blobs/uploads/{}", state.config.get_url(), name, layer_uuid);
     (
         StatusCode::ACCEPTED,
         [
@@ -82,7 +94,11 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
     ).into_response()
 }
 
-pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, state: State<Arc<AppState>>, body: Bytes) -> impl IntoResponse {
+pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, body: Bytes) -> Response {
+    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
+        return get_unauthenticated_response(&state.config);
+    }
+    
     let digest = query.get("digest").unwrap();
 
     let storage = state.storage.lock().await;
@@ -102,18 +118,26 @@ pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, S
             (header::CONTENT_LENGTH, "0".to_string()),
             (HeaderName::from_static("docker-upload-digest"), digest.to_owned())
         ]
-    )
+    ).into_response()
 }
 
-pub async fn cancel_upload_delete(Path((_name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
+        return get_unauthenticated_response(&state.config);
+    }
+    
     let storage = state.storage.lock().await;
     storage.delete_digest(&layer_uuid).await.unwrap();
     
     // I'm not sure what this response should be, its not specified in the registry spec.
-    StatusCode::OK
+    StatusCode::OK.into_response()
 }
 
-pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
+        return get_unauthenticated_response(&state.config);
+    }
+    
     let storage = state.storage.lock().await;
     let ending = storage.digest_length(&layer_uuid).await.unwrap().unwrap_or(0);
 
@@ -124,5 +148,5 @@ pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, Str
             (header::RANGE, format!("0-{}", ending)),
             (HeaderName::from_static("docker-upload-digest"), layer_uuid)
         ]
-    )
+    ).into_response()
 }

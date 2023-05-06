@@ -2,7 +2,7 @@ use std::{sync::Arc, collections::{HashMap, BTreeMap}, time::{SystemTime, UNIX_E
 
 use axum::{extract::{Query, State}, response::{IntoResponse, Response}, http::{StatusCode, header}, Form};
 use axum_auth::AuthBasic;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, span, Level};
 
@@ -12,7 +12,7 @@ use sha2::Sha256;
 
 use rand::Rng;
 
-use crate::{dto::scope::Scope, app_state::AppState};
+use crate::{dto::{scope::Scope, user::{UserAuth, TokenInfo}}, app_state::AppState};
 use crate::database::Database;
 
 #[derive(Deserialize, Debug)]
@@ -41,13 +41,12 @@ pub struct AuthResponse {
     issued_at: String,
 }
 
-fn create_jwt_token(account: String) -> anyhow::Result<String> {
+/// In the returned UserToken::user, only the username is specified
+fn create_jwt_token(account: &str) -> anyhow::Result<TokenInfo> {
     let key: Hmac<Sha256> = Hmac::new_from_slice(b"some-secret")?;
     
-    let now = SystemTime::now();
-    let now_secs = now
-        .duration_since(UNIX_EPOCH)?
-        .as_secs();
+    let now = chrono::offset::Utc::now();
+    let now_secs = now.timestamp();
 
     // Construct the claims for the token
     let mut claims = BTreeMap::new();
@@ -55,19 +54,23 @@ fn create_jwt_token(account: String) -> anyhow::Result<String> {
     claims.insert("subject", &account);
     //claims.insert("audience", auth.service);
 
-    let notbefore = format!("{}", now_secs - 10);
-    let issuedat = format!("{}", now_secs);
+    let not_before = format!("{}", now_secs - 10);
+    let issued_at = format!("{}", now_secs);
     let expiration = format!("{}", now_secs + 20);
-    claims.insert("notbefore", &notbefore);
-    claims.insert("issuedat", &issuedat);
+    claims.insert("notbefore", &not_before);
+    claims.insert("issuedat", &issued_at);
     claims.insert("expiration", &expiration); // TODO: 20 seconds expiry for testing
+
+    let issued_at = now;
+    let expiration = now + Duration::seconds(20);
 
     // Create a randomized jwtid
     let mut rng = rand::thread_rng();
     let jwtid = format!("{}", rng.gen::<u64>());
     claims.insert("jwtid", &jwtid);
 
-    Ok(claims.sign_with_key(&key)?)
+    let token_str = claims.sign_with_key(&key)?;
+    Ok(TokenInfo::new(token_str, expiration, issued_at))
 }
 
 pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppState>>, Query(params): Query<HashMap<String, String>>, form: Option<Form<AuthForm>>) -> Response {
@@ -142,6 +145,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
     // Process all the scopes
     if let Some(scope) = params.get("scope") {
+        
         // TODO: Handle multiple scopes
         auth.scope.push(Scope::try_from(&scope[..]).unwrap());
     }
@@ -159,7 +163,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
     debug!("Constructed auth request");
 
-    if let (Some(account), Some(password)) = (auth.account, auth.password) {
+    if let (Some(account), Some(password)) = (&auth.account, auth.password) {
         // Ensure that the password is correct
         let database = &state.database;
         if !database.verify_user_login(account.clone(), password).await.unwrap() {
@@ -168,11 +172,11 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
                 StatusCode::UNAUTHORIZED
             ).into_response();
         }
-        drop(database);
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token_str = create_jwt_token(account).unwrap();
+        let token = create_jwt_token(account).unwrap();
+        let token_str = token.token;
 
         debug!("Created jwt token");
 
@@ -189,8 +193,8 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
         let json_str = serde_json::to_string(&auth_response).unwrap();
 
-        let mut auth_storage = state.auth_storage.lock().await;
-        auth_storage.valid_tokens.insert(token_str.clone());
+        database.store_user_token(token_str.clone(), account.clone(), token.expiry, token.created_at).await.unwrap();
+        drop(database);
 
         return (
             StatusCode::OK,
