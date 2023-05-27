@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
-use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response};
+use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response, does_user_have_repository_permission};
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
 use crate::dto::user::{Permission, RegistryUserType, UserAuth};
@@ -16,11 +16,14 @@ use crate::dto::user::{Permission, RegistryUserType, UserAuth};
 pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
     let database = &state.database;
-    if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
+    /* if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
             && !database.get_repository_visibility(&name).await.unwrap()
             .and_then(|v| Some(v == RepositoryVisibility::Public))
             .unwrap_or_else(|| false) {
         
+        return get_unauthenticated_response(&state.config);
+    } */
+    if !does_user_have_repository_permission(database, auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {        
         return get_unauthenticated_response(&state.config);
     }
     drop(database);
@@ -45,11 +48,7 @@ pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String
 pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
     let database = &state.database;
-    if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
-            && !database.get_repository_visibility(&name).await.unwrap()
-            .and_then(|v| Some(v == RepositoryVisibility::Public))
-            .unwrap_or_else(|| false) {
-        
+    if !does_user_have_repository_permission(database, auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {        
         return get_unauthenticated_response(&state.config);
     }
     drop(database);

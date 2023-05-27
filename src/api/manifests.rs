@@ -7,7 +7,7 @@ use axum::http::{StatusCode, HeaderMap, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
-use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response};
+use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response, does_user_have_repository_permission};
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
@@ -64,11 +64,7 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
 pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
     let database = &state.database;
-    if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
-            && !database.get_repository_visibility(&name).await.unwrap()
-            .and_then(|v| Some(v == RepositoryVisibility::Public))
-            .unwrap_or_else(|| false) {
-        
+    if !does_user_have_repository_permission(database, auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
         return get_unauthenticated_response(&state.config);
     }
     drop(database);
@@ -111,11 +107,7 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
 pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
     let database = &state.database;
-    if !does_user_have_permission(database, auth.user.username, name.clone(), Permission::PULL).await.unwrap()
-            && !database.get_repository_visibility(&name).await.unwrap()
-            .and_then(|v| Some(v == RepositoryVisibility::Public))
-            .unwrap_or_else(|| false) {
-        
+    if !does_user_have_repository_permission(database, auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
         return get_unauthenticated_response(&state.config);
     }
     drop(database);
