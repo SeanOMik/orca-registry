@@ -15,6 +15,8 @@ use rand::Rng;
 use crate::{dto::{scope::Scope, user::{UserAuth, TokenInfo}}, app_state::AppState};
 use crate::database::Database;
 
+use crate::auth_storage::{unauthenticated_response, AuthDriver};
+
 #[derive(Deserialize, Debug)]
 pub struct TokenAuthRequest {
     user: Option<String>,
@@ -165,13 +167,14 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
     if let (Some(account), Some(password)) = (&auth.account, auth.password) {
         // Ensure that the password is correct
-        let database = &state.database;
-        if !database.verify_user_login(account.clone(), password).await.unwrap() {
+        let auth_driver = state.auth_checker.lock().await;
+        if !auth_driver.verify_user_login(account.clone(), password).await.unwrap() {
             debug!("Authentication failed, incorrect password!");
-            return (
-                StatusCode::UNAUTHORIZED
-            ).into_response();
+            
+            return unauthenticated_response(&state.config);
         }
+        drop(auth_driver);
+
         debug!("User password is correct");
 
         let now = SystemTime::now();
@@ -193,6 +196,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
         let json_str = serde_json::to_string(&auth_response).unwrap();
 
+        let database = &state.database;
         database.store_user_token(token_str.clone(), account.clone(), token.expiry, token.created_at).await.unwrap();
         drop(database);
 

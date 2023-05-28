@@ -12,14 +12,15 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
-use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response};
+use crate::auth_storage::{unauthenticated_response, AuthDriver};
 use crate::byte_stream::ByteStream;
 use crate::database::Database;
 use crate::dto::user::{UserAuth, Permission, RegistryUser, RegistryUserType};
 
 /// Starting an upload
 pub async fn start_upload_post(Path((name, )): Path<(String, )>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>) -> Response {
-    if does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
+    let auth_driver = state.auth_checker.lock().await;
+    if auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         debug!("Upload requested");
         let uuid = uuid::Uuid::new_v4();
 
@@ -34,13 +35,15 @@ pub async fn start_upload_post(Path((name, )): Path<(String, )>, Extension(auth)
         ).into_response();
     }
 
-    get_unauthenticated_response(&state.config)
+    unauthenticated_response(&state.config)
 }
 
 pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, mut body: BodyStream) -> Response {
-    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
+    drop(auth_driver);
 
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await.unwrap();
@@ -95,9 +98,11 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
 }
 
 pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, body: Bytes) -> Response {
-    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
+    drop(auth_driver);
     
     let digest = query.get("digest").unwrap();
 
@@ -122,9 +127,11 @@ pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, S
 }
 
 pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
-    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
+    drop(auth_driver);
     
     let storage = state.storage.lock().await;
     storage.delete_digest(&layer_uuid).await.unwrap();
@@ -134,9 +141,11 @@ pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String
 }
 
 pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
-    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
+    drop(auth_driver);
     
     let storage = state.storage.lock().await;
     let ending = storage.digest_length(&layer_uuid).await.unwrap().unwrap_or(0);

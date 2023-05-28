@@ -7,7 +7,7 @@ use axum::http::{StatusCode, HeaderMap, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
-use crate::auth_storage::{does_user_have_permission, get_unauthenticated_response, does_user_have_repository_permission};
+use crate::auth_storage::{unauthenticated_response, AuthDriver};
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
@@ -16,9 +16,11 @@ use crate::dto::manifest::Manifest;
 use crate::dto::user::{UserAuth, Permission};
 
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>, body: String) -> Response {
-    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
+    drop(auth_driver);
 
     // Calculate the sha256 digest for the manifest.
     let calculated_hash = sha256::digest(body.clone());
@@ -63,11 +65,11 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
 
 pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
-    let database = &state.database;
-    if !does_user_have_repository_permission(database, auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
-    drop(database);
+    drop(auth_driver);
     
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
@@ -106,11 +108,11 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
 
 pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
-    let database = &state.database;
-    if !does_user_have_repository_permission(database, auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
-    drop(database);
+    drop(auth_driver);
     
     // Get the digest from the reference path.
     let database = &state.database;
@@ -146,9 +148,11 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
 }
 
 pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, headers: HeaderMap, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
-    if !does_user_have_permission(&state.database, auth.user.username, name.clone(), Permission::PUSH).await.unwrap() {
-        return get_unauthenticated_response(&state.config);
+    let auth_driver = state.auth_checker.lock().await;
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
+        return unauthenticated_response(&state.config);
     }
+    drop(auth_driver);
     
     let _authorization = headers.get("Authorization").unwrap(); // TODO: use authorization header
 

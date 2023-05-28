@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use auth_storage::AuthDriver;
 use axum::http::{Request, StatusCode, header, HeaderName};
 use axum::middleware::Next;
 use axum::response::{Response, IntoResponse};
@@ -66,11 +67,12 @@ async fn main() -> std::io::Result<()> {
     pool.create_schema().await.unwrap();
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
+    let auth_driver: Mutex<Box<dyn AuthDriver>> = Mutex::new(Box::new(pool.clone()));
 
     let config = Config::new().expect("Failure to parse config!");
     let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port)).unwrap();
 
-    let state = Arc::new(AppState::new(pool, storage_driver, config));
+    let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
 
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)

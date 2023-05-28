@@ -63,3 +63,6 @@ CREATE TABLE IF NOT EXISTS user_tokens (
     expiry BIGINT NOT NULL,
     created_at BIGINT NOT NULL
 );
+
+-- create admin user
+INSERT OR IGNORE INTO users (username, email, password_hash, password_salt) VALUES ('admin', 'admin@example.com', '$2b$12$x5ECk0jUmOSfBWxW52wsyOmFxNZkwc2J9FH225if4eBnQYUvYLYYq', 'x5ECk0jUmOSfBWxW52wsyO');
