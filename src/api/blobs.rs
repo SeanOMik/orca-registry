@@ -8,14 +8,14 @@ use axum::response::{IntoResponse, Response};
 use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
-use crate::auth_storage::{unauthenticated_response, AuthDriver};
+use crate::auth::{unauthenticated_response, AuthDriver};
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
 use crate::dto::user::{Permission, RegistryUserType, UserAuth};
 
 pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {        
         return unauthenticated_response(&state.config);
     }
@@ -40,7 +40,7 @@ pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String
 
 pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {        
         return unauthenticated_response(&state.config);
     }

@@ -4,11 +4,37 @@ use serde::Deserialize;
 
 use std::env;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
+pub struct LdapConnectionConfig {
+    pub connection_url: String,
+    pub bind_dn: String,
+    pub bind_password: String,
+    pub user_base_dn: String,
+    pub group_base_dn: String,
+    pub user_search_filter: String,
+    pub group_search_filter: String,
+    pub admin_filter: String,
+
+    #[serde(default = "default_login_attribute")]
+    pub login_attribute: String,
+    #[serde(default = "default_display_name_attribute")]
+    pub display_name_attribute: String,
+}
+
+fn default_login_attribute() -> String {
+    "mail".to_string()
+}
+
+fn default_display_name_attribute() -> String {
+    "displayName".to_string()
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     pub url: Option<String>,
+    pub ldap: Option<LdapConnectionConfig>,
 }
 
 #[allow(dead_code)]

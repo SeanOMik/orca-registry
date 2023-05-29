@@ -8,5 +8,7 @@ pkgs.mkShell {
     postgresql
     sqlite
     diesel-cli
+    openssl
+    pkg-config
   ];
 }

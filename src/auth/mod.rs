@@ -1,3 +1,5 @@
+pub mod ldap_driver;
+
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
 use axum::{extract::{State, Path}, http::{StatusCode, HeaderMap, header, HeaderName, Request}, middleware::Next, response::{Response, IntoResponse}};
@@ -18,60 +20,51 @@ pub trait AuthDriver: Send + Sync {
     /// * `repository`: Name of the repository.
     /// * `permissions`: Permission to check for.
     /// * `required_visibility`: Specified if there is a specific visibility of the repository that will give the user permission.
-    async fn user_has_permission(&self, username: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool>;
-    async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool>;
+    async fn user_has_permission(&mut self, email: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool>;
+    async fn verify_user_login(&mut self, email: String, password: String) -> anyhow::Result<bool>;
 }
 
 #[async_trait]
 impl AuthDriver for Pool<Sqlite> {
-    async fn user_has_permission(&self, username: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool> {
+    async fn user_has_permission(&mut self, email: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool> {
         let allowed_to = {
-            match self.get_user_registry_type(username.clone()).await? {
+            match self.get_user_registry_type(email.clone()).await? {
                 Some(RegistryUserType::Admin) => true,
                 _ => {
-                    if let Some(perms) = self.get_user_repo_permissions(username, repository.clone()).await? {
-                        if perms.has_permission(permission) {
-                            return Ok(true);
-                        }
-                    }
-    
-                    if let Some(vis) = required_visibility {
-                        if let Some(repo_vis) = self.get_repository_visibility(&repository).await? {
-                            if vis == repo_vis {
-                                return Ok(true);
-                            }
-                        }
-                    }
-    
-                    false
+                    check_user_permissions(self, email, repository, permission, required_visibility).await?
                 }
-                /* match database.get_user_repo_permissions(username, repository).await.unwrap() {
-                    Some(perms) => if perms.has_permission(permission) { true } else { false },
-                    _ => false,
-                } */
             }
         };
     
         Ok(allowed_to)
     }
 
-    async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool> {
-        Database::verify_user_login(self, username, password).await
+    async fn verify_user_login(&mut self, email: String, password: String) -> anyhow::Result<bool> {
+        Database::verify_user_login(self, email, password).await
     }
 }
 
-/// Temporary struct for storing auth information in memory.
-/* pub struct MemoryAuthStorage {
-    pub valid_tokens: HashSet<String>,
-}
-
-impl MemoryAuthStorage {
-    pub fn new() -> Self {
-        Self {
-            valid_tokens: HashSet::new(),
+// This ONLY checks permissions, does not check user type
+pub async fn check_user_permissions<D>(database: &D, email: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool>
+where
+    D: Database
+{
+    if let Some(perms) = database.get_user_repo_permissions(email, repository.clone()).await? {
+        if perms.has_permission(permission) {
+            return Ok(true);
         }
     }
-} */
+
+    if let Some(vis) = required_visibility {
+        if let Some(repo_vis) = database.get_repository_visibility(&repository).await? {
+            if vis == repo_vis {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
 
 #[derive(Clone)]
 pub struct AuthToken(pub String);

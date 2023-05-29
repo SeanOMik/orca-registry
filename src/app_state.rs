@@ -1,6 +1,6 @@
 use sqlx::{Sqlite, Pool};
 
-use crate::auth_storage::AuthDriver;
+use crate::auth::AuthDriver;
 use crate::storage::StorageDriver;
 use crate::config::Config;
 

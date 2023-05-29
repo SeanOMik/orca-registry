@@ -6,13 +6,13 @@ mod storage;
 mod byte_stream;
 mod config;
 mod query;
-mod auth_storage;
+mod auth;
 
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use auth_storage::AuthDriver;
+use auth::{AuthDriver, ldap_driver::LdapAuthDriver};
 use axum::http::{Request, StatusCode, header, HeaderName};
 use axum::middleware::Next;
 use axum::response::{Response, IntoResponse};
@@ -29,10 +29,11 @@ use tracing::{debug, Level};
 use app_state::AppState;
 use database::Database;
 
+use crate::dto::user::Permission;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
-use crate::config::Config;
+use crate::config::{Config, LdapConnectionConfig};
 
 use tower_http::trace::TraceLayer;
 
@@ -60,6 +61,12 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resp
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
+
+    let config = Config::new().expect("Failure to parse config!");
+
     let pool = SqlitePoolOptions::new()
         .max_connections(15)
         .connect("test.db").await.unwrap();
@@ -67,18 +74,25 @@ async fn main() -> std::io::Result<()> {
     pool.create_schema().await.unwrap();
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
-    let auth_driver: Mutex<Box<dyn AuthDriver>> = Mutex::new(Box::new(pool.clone()));
+    
+    // figure out the auth driver depending on whats specified in the config,
+    // the fallback is a database auth driver.
+    let auth_driver: Mutex<Box<dyn AuthDriver>> = match config.ldap.clone() {
+        Some(ldap) => {
+            let ldap_driver = LdapAuthDriver::new(ldap, pool.clone()).await.unwrap();
+            Mutex::new(Box::new(ldap_driver))
+        },
+        None => {
+            Mutex::new(Box::new(pool.clone()))
+        }
+    };
 
-    let config = Config::new().expect("Failure to parse config!");
     let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port)).unwrap();
 
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
+   
 
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
-
-    let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth_storage::require_auth);
+    let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 
     let app = Router::new()

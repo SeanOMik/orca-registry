@@ -5,17 +5,37 @@ use chrono::{DateTime, Utc};
 
 use super::RepositoryVisibility;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LoginSource {
+    Database = 0,
+    LDAP = 1
+}
+
+impl TryFrom<u32> for LoginSource {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Database),
+            1 => Ok(Self::LDAP),
+            _ => Err(anyhow::anyhow!("Invalid value for LoginSource: `{}`", value)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct User {
     pub username: String,
     pub email: String,
+    pub source: LoginSource,
 }
 
 impl User {
-    pub fn new(username: String, email: String) -> Self {
+    pub fn new(username: String, email: String, source: LoginSource) -> Self {
         Self {
             username,
             email,
+            source,
         }
     }
 }

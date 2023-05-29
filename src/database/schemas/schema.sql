@@ -35,8 +35,14 @@ CREATE TABLE IF NOT EXISTS manifest_layers (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-    username TEXT NOT NULL UNIQUE PRIMARY KEY,
-    email TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE PRIMARY KEY,
+    username TEXT NOT NULL,
+    -- 0 = local, 1 = ldap
+    login_source BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_logins (
+    email TEXT NOT NULL UNIQUE PRIMARY KEY,
     -- bcrypt hashed password
     password_hash TEXT NOT NULL,
     -- the salt generated along side the password hash
@@ -44,13 +50,13 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS user_registry_permissions (
-    username TEXT NOT NULL UNIQUE PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE PRIMARY KEY,
     -- 0 = regular user, 1 = admin
     user_type INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_repo_permissions (
-    username TEXT NOT NULL UNIQUE PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE PRIMARY KEY,
     -- name of repository that this user has these permissions in
     repository_name TEXT NOT NULL,
     -- bitwised integer storing permissions
@@ -59,10 +65,11 @@ CREATE TABLE IF NOT EXISTS user_repo_permissions (
 
 CREATE TABLE IF NOT EXISTS user_tokens (
     token TEXT NOT NULL UNIQUE PRIMARY KEY,
-    username TEXT NOT NULL,
+    email TEXT NOT NULL,
     expiry BIGINT NOT NULL,
     created_at BIGINT NOT NULL
 );
 
 -- create admin user
-INSERT OR IGNORE INTO users (username, email, password_hash, password_salt) VALUES ('admin', 'admin@example.com', '$2b$12$x5ECk0jUmOSfBWxW52wsyOmFxNZkwc2J9FH225if4eBnQYUvYLYYq', 'x5ECk0jUmOSfBWxW52wsyO');
+INSERT OR IGNORE INTO users (username, email, login_source) VALUES ('admin', 'admin@example.com', 0);
+INSERT OR IGNORE INTO user_logins (email, password_hash, password_salt) VALUES ('admin@example.com', '$2b$12$x5ECk0jUmOSfBWxW52wsyOmFxNZkwc2J9FH225if4eBnQYUvYLYYq', 'x5ECk0jUmOSfBWxW52wsyO');

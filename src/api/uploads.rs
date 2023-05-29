@@ -12,14 +12,14 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
-use crate::auth_storage::{unauthenticated_response, AuthDriver};
+use crate::auth::{unauthenticated_response, AuthDriver};
 use crate::byte_stream::ByteStream;
 use crate::database::Database;
 use crate::dto::user::{UserAuth, Permission, RegistryUser, RegistryUserType};
 
 /// Starting an upload
 pub async fn start_upload_post(Path((name, )): Path<(String, )>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         debug!("Upload requested");
         let uuid = uuid::Uuid::new_v4();
@@ -39,7 +39,7 @@ pub async fn start_upload_post(Path((name, )): Path<(String, )>, Extension(auth)
 }
 
 pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, mut body: BodyStream) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         return unauthenticated_response(&state.config);
     }
@@ -98,7 +98,7 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
 }
 
 pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, body: Bytes) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         return unauthenticated_response(&state.config);
     }
@@ -127,7 +127,7 @@ pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, S
 }
 
 pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         return unauthenticated_response(&state.config);
     }
@@ -141,7 +141,7 @@ pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String
 }
 
 pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         return unauthenticated_response(&state.config);
     }

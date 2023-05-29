@@ -7,7 +7,7 @@ use axum::http::{StatusCode, HeaderMap, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
-use crate::auth_storage::{unauthenticated_response, AuthDriver};
+use crate::auth::{unauthenticated_response, AuthDriver};
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
@@ -16,7 +16,7 @@ use crate::dto::manifest::Manifest;
 use crate::dto::user::{UserAuth, Permission};
 
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>, body: String) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         return unauthenticated_response(&state.config);
     }
@@ -65,7 +65,7 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
 
 pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
         return unauthenticated_response(&state.config);
     }
@@ -108,7 +108,7 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
 
 pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
     // Check if the user has permission to pull, or that the repository is public
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
         return unauthenticated_response(&state.config);
     }
@@ -148,7 +148,7 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
 }
 
 pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, headers: HeaderMap, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
-    let auth_driver = state.auth_checker.lock().await;
+    let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
         return unauthenticated_response(&state.config);
     }

@@ -4,7 +4,7 @@ use tracing::debug;
 
 use chrono::{DateTime, Utc, NaiveDateTime, TimeZone};
 
-use crate::dto::{Tag, user::{User, RepositoryPermissions, RegistryUserType, Permission, UserAuth, TokenInfo}, RepositoryVisibility};
+use crate::dto::{Tag, user::{User, RepositoryPermissions, RegistryUserType, Permission, UserAuth, TokenInfo, LoginSource}, RepositoryVisibility};
 
 #[async_trait]
 pub trait Database {
@@ -50,12 +50,14 @@ pub trait Database {
 
 
     /// User stuff
-    async fn create_user(&self, username: String, email: String, password_hash: String, password_salt: String) -> sqlx::Result<User>;
-    async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool>;
-    async fn get_user_registry_type(&self, username: String) -> anyhow::Result<Option<RegistryUserType>>;
-    async fn get_user_repo_permissions(&self, username: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>>;
-    async fn get_user_registry_usertype(&self, username: String) -> anyhow::Result<Option<RegistryUserType>>;
-    async fn store_user_token(&self, token: String, username: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()>;
+    async fn does_user_exist(&self, email: String) -> sqlx::Result<bool>;
+    async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> sqlx::Result<User>;
+    async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> sqlx::Result<()>;
+    async fn verify_user_login(&self, email: String, password: String) -> anyhow::Result<bool>;
+    async fn get_user_registry_type(&self, email: String) -> anyhow::Result<Option<RegistryUserType>>;
+    async fn get_user_repo_permissions(&self, email: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>>;
+    async fn get_user_registry_usertype(&self, email: String) -> anyhow::Result<Option<RegistryUserType>>;
+    async fn store_user_token(&self, token: String, email: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()>;
     async fn verify_user_token(&self, token: String) -> anyhow::Result<Option<UserAuth>>;
 }
 
@@ -233,8 +235,7 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn has_repository(&self, repository: &str) -> sqlx::Result<bool> {
-        debug!("before query ig");
-        let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) repositories WHERE 'name' = ?")
+        let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) FROM repositories WHERE \"name\" = ?")
                 .bind(repository)
                 .fetch_one(self).await {
             Ok(row) => row,
@@ -321,33 +322,61 @@ impl Database for Pool<Sqlite> {
         Ok(repos)
     }
 
-    async fn create_user(&self, username: String, email: String, password_hash: String, password_salt: String) -> sqlx::Result<User> {
+    async fn does_user_exist(&self, email: String) -> sqlx::Result<bool> {
+        let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) FROM users WHERE \"email\" = ?")
+                .bind(email)
+                .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(false)
+                },
+                _ => {
+                    return Err(e);
+                }
+            }
+        };
+
+        Ok(row.0 > 0)
+    }
+
+    async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> sqlx::Result<User> {
         let username = username.to_lowercase();
         let email = email.to_lowercase();
-        sqlx::query("INSERT INTO users (username, email, password_hash, password_salt) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (username, email, login_source) VALUES (?, ?, ?)")
             .bind(username.clone())
+            .bind(email.clone())
+            .bind(login_source as u32)
+            .execute(self).await?;
+
+        Ok(User::new(username, email, login_source))
+    }
+
+    async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> sqlx::Result<()> {
+        let email = email.to_lowercase();
+        sqlx::query("INSERT INTO user_logins (email, password_hash, password_salt) VALUES (?, ?, ?)")
             .bind(email.clone())
             .bind(password_hash)
             .bind(password_salt)
             .execute(self).await?;
 
-        Ok(User::new(username, email))
+        Ok(())
     }
 
-    async fn verify_user_login(&self, username: String, password: String) -> anyhow::Result<bool> {
-        let username = username.to_lowercase();
-        let row: (String, ) = sqlx::query_as("SELECT password_hash FROM users WHERE username = ?")
-            .bind(username)
+    async fn verify_user_login(&self, email: String, password: String) -> anyhow::Result<bool> {
+        let email = email.to_lowercase();
+        let row: (String, ) = sqlx::query_as("SELECT password_hash FROM users WHERE email = ?")
+            .bind(email)
             .fetch_one(self).await?;
 
         Ok(bcrypt::verify(password, &row.0)?)
     }
 
-    async fn get_user_registry_type(&self, username: String) -> anyhow::Result<Option<RegistryUserType>> {
-        let username = username.to_lowercase();
+    async fn get_user_registry_type(&self, email: String) -> anyhow::Result<Option<RegistryUserType>> {
+        let email = email.to_lowercase();
         
-        let row: (u32, ) = match sqlx::query_as("SELECT user_type FROM user_registry_permissions WHERE username = ?")
-                .bind(username)
+        let row: (u32, ) = match sqlx::query_as("SELECT user_type FROM user_registry_permissions WHERE email = ?")
+                .bind(email)
                 .fetch_one(self).await {
             Ok(row) => row,
             Err(e) => match e {
@@ -363,11 +392,11 @@ impl Database for Pool<Sqlite> {
         Ok(Some(RegistryUserType::try_from(row.0)?))
     }
 
-    async fn get_user_repo_permissions(&self, username: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>> {
-        let username = username.to_lowercase();
+    async fn get_user_repo_permissions(&self, email: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>> {
+        let email = email.to_lowercase();
         
-        let row: (u32, ) = match sqlx::query_as("SELECT repository_permissions FROM user_repo_permissions WHERE username = ? AND repository_name = ?")
-                .bind(username.clone())
+        let row: (u32, ) = match sqlx::query_as("SELECT repository_permissions FROM user_repo_permissions WHERE email = ? AND repository_name = ?")
+                .bind(email.clone())
                 .bind(repository.clone())
                 .fetch_one(self).await {
             Ok(row) => row,
@@ -384,7 +413,7 @@ impl Database for Pool<Sqlite> {
         let vis = self.get_repository_visibility(&repository).await?.unwrap();
 
         // Also get the user type for the registry, if its admin return admin repository permissions
-        let utype = self.get_user_registry_usertype(username).await?.unwrap(); // unwrap should be safe
+        let utype = self.get_user_registry_usertype(email).await?.unwrap(); // unwrap should be safe
         if utype == RegistryUserType::Admin {
             Ok(Some(RepositoryPermissions::new(Permission::ADMIN.bits(), vis)))
         } else {
@@ -392,22 +421,22 @@ impl Database for Pool<Sqlite> {
         }
     }
 
-    async fn get_user_registry_usertype(&self, username: String) -> anyhow::Result<Option<RegistryUserType>> {
-        let username = username.to_lowercase();
-        let row: (u32, ) = sqlx::query_as("SELECT user_type FROM user_registry_permissions WHERE username = ?")
-            .bind(username)
+    async fn get_user_registry_usertype(&self, email: String) -> anyhow::Result<Option<RegistryUserType>> {
+        let email = email.to_lowercase();
+        let row: (u32, ) = sqlx::query_as("SELECT user_type FROM user_registry_permissions WHERE email = ?")
+            .bind(email)
             .fetch_one(self).await?;
 
         Ok(Some(RegistryUserType::try_from(row.0)?))
     }
 
-    async fn store_user_token(&self, token: String, username: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()> {
-        let username = username.to_lowercase();
+    async fn store_user_token(&self, token: String, email: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()> {
+        let email = email.to_lowercase();
         let expiry = expiry.timestamp();
         let created_at = created_at.timestamp();
-        sqlx::query("INSERT INTO user_tokens (token, username, expiry, created_at) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO user_tokens (token, email, expiry, created_at) VALUES (?, ?, ?, ?)")
             .bind(token)
-            .bind(username)
+            .bind(email)
             .bind(expiry)
             .bind(created_at)
             .execute(self).await?;
@@ -416,18 +445,42 @@ impl Database for Pool<Sqlite> {
     }
     
     async fn verify_user_token(&self, token: String) -> anyhow::Result<Option<UserAuth>> {
-        let token_row: (String, i64, i64, ) = sqlx::query_as("SELECT username, expiry, created_at FROM user_tokens WHERE token = ?")
+        let token_row: (String, i64, i64,) = match sqlx::query_as("SELECT email, expiry, created_at FROM user_tokens WHERE token = ?")
             .bind(token.clone())
-            .fetch_one(self).await?;
+            .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
 
-        let (username, expiry, created_at) = (token_row.0, token_row.1, token_row.2);
+        let (email, expiry, created_at) = (token_row.0, token_row.1, token_row.2);
 
-        let user_row: (String, ) = sqlx::query_as("SELECT email FROM users WHERE username = ?")
-            .bind(username.clone())
-            .fetch_one(self).await?;
+        let user_row: (String, u32) = match sqlx::query_as("SELECT username, login_source FROM users WHERE email = ?")
+            .bind(email.clone())
+            .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        /* let user_row: (String, u32) = sqlx::query_as("SELECT email, login_source FROM users WHERE email = ?")
+            .bind(email.clone())
+            .fetch_one(self).await?; */
 
         let (expiry, created_at) = (Utc.timestamp_millis_opt(expiry).unwrap(), Utc.timestamp_millis_opt(created_at).unwrap());
-        let user = User::new(username, user_row.0);
+        let user = User::new(email, user_row.0, LoginSource::try_from(user_row.1)?);
         let token = TokenInfo::new(token, expiry, created_at);
         let auth = UserAuth::new(user, token);
 

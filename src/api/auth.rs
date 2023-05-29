@@ -15,7 +15,7 @@ use rand::Rng;
 use crate::{dto::{scope::Scope, user::{UserAuth, TokenInfo}}, app_state::AppState};
 use crate::database::Database;
 
-use crate::auth_storage::{unauthenticated_response, AuthDriver};
+use crate::auth::{unauthenticated_response, AuthDriver};
 
 #[derive(Deserialize, Debug)]
 pub struct TokenAuthRequest {
@@ -167,7 +167,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
     if let (Some(account), Some(password)) = (&auth.account, auth.password) {
         // Ensure that the password is correct
-        let auth_driver = state.auth_checker.lock().await;
+        let mut auth_driver = state.auth_checker.lock().await;
         if !auth_driver.verify_user_login(account.clone(), password).await.unwrap() {
             debug!("Authentication failed, incorrect password!");
             
