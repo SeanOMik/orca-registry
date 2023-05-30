@@ -1,5 +1,9 @@
 - [x] slashes in repo names
-- [ ] Simple auth
+- [x] Simple auth
+- [x] ldap auth
+- [ ] permission stuff
+  - [ ] Only allow users to create repositories if its the same name as their username, or if they're an admin
+  - [ ] Only allow users to pull from their own repositories
 - [ ] postgresql
 - [ ] prometheus metrics
 - [x] streaming layer bytes into providers

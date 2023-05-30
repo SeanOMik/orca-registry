@@ -5,20 +5,19 @@ mod dto;
 mod storage;
 mod byte_stream;
 mod config;
-mod query;
 mod auth;
+mod error;
 
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use auth::{AuthDriver, ldap_driver::LdapAuthDriver};
-use axum::http::{Request, StatusCode, header, HeaderName};
+use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
-use axum::response::{Response, IntoResponse};
+use axum::response::Response;
 use axum::{Router, routing};
 use axum::ServiceExt;
-use bcrypt::Version;
 use tower_layer::Layer;
 
 use sqlx::sqlite::SqlitePoolOptions;
@@ -29,21 +28,21 @@ use tracing::{debug, Level};
 use app_state::AppState;
 use database::Database;
 
-use crate::dto::user::Permission;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
-use crate::config::{Config, LdapConnectionConfig};
+use crate::config::Config;
 
 use tower_http::trace::TraceLayer;
 
 /// Encode the 'name' path parameter in the url
-async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Response {
+async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
     // Attempt to find the name using regex in the url
-    let regex = regex::Regex::new(r"/v2/([\w/]+)/(blobs|tags|manifests)").unwrap();
+    let regex = regex::Regex::new(r"/v2/([\w/]+)/(blobs|tags|manifests)")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let captures = match regex.captures(request.uri().path()) {
         Some(captures) => captures,
-        None => return next.run(request).await,
+        None => return Ok(next.run(request).await),
     };
 
     // Find the name in the request and encode it in the url
@@ -54,24 +53,25 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resp
     let uri_str = request.uri().to_string().replace(&name, &encoded_name);
     debug!("Rewrote request url to: '{}'", uri_str);
 
-    *request.uri_mut() = uri_str.parse().unwrap();
+    *request.uri_mut() = uri_str.parse()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    next.run(request).await
+    Ok(next.run(request).await)
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .init();
 
-    let config = Config::new().expect("Failure to parse config!");
+    let config = Config::new()
+        .expect("Failure to parse config!");
 
     let pool = SqlitePoolOptions::new()
         .max_connections(15)
-        .connect("test.db").await.unwrap();
-
-    pool.create_schema().await.unwrap();
+        .connect("test.db").await?;
+    pool.create_schema().await?;
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
     
@@ -79,7 +79,7 @@ async fn main() -> std::io::Result<()> {
     // the fallback is a database auth driver.
     let auth_driver: Mutex<Box<dyn AuthDriver>> = match config.ldap.clone() {
         Some(ldap) => {
-            let ldap_driver = LdapAuthDriver::new(ldap, pool.clone()).await.unwrap();
+            let ldap_driver = LdapAuthDriver::new(ldap, pool.clone()).await?;
             Mutex::new(Box::new(ldap_driver))
         },
         None => {
@@ -87,7 +87,7 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
-    let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port)).unwrap();
+    let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
 
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
@@ -129,8 +129,7 @@ async fn main() -> std::io::Result<()> {
     debug!("Starting http server, listening on {}", app_addr);
     axum::Server::bind(&app_addr)
         .serve(layered_app.into_make_service())
-        .await
-        .unwrap();
+        .await?;
 
     Ok(())
 }

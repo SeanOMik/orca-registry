@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use axum::{extract::{Path, Query, State}, response::IntoResponse, http::{StatusCode, header, HeaderMap, HeaderName}};
+use axum::{extract::{Path, Query, State}, response::{IntoResponse, Response}, http::{StatusCode, header, HeaderMap, HeaderName}};
 use serde::{Serialize, Deserialize};
 
-use crate::{app_state::AppState, database::Database};
+use crate::{app_state::AppState, database::Database, error::AppError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +21,7 @@ pub struct ListRepositoriesParams {
     last_tag: Option<String>,
 }
 
-pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
@@ -31,7 +31,7 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
 
             // Convert the last param to a String, and list all the tags
             let last_tag = params.last_tag.and_then(|t| Some(t.to_string()));
-            let tags = database.list_repository_tags_page(&name, limit, last_tag).await.unwrap();
+            let tags = database.list_repository_tags_page(&name, limit, last_tag).await?;
 
             // Get the new last repository for the response
             let last_tag = tags.last();
@@ -48,7 +48,7 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
             tags
         },
         None => {
-            database.list_repository_tags(&name).await.unwrap()
+            database.list_repository_tags(&name).await?
         }
     };
 
@@ -57,21 +57,21 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
         name,
         tags: tags.into_iter().map(|t| t.name).collect(),
     };
-    let response_body = serde_json::to_string(&tag_list).unwrap();
+    let response_body = serde_json::to_string(&tag_list)?;
 
     // Create headers
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
+    headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse()?);
 
     // Add the link header if it was constructed
     if let Some(link_header) = link_header {
-        headers.insert(header::LINK, link_header.parse().unwrap());
+        headers.insert(header::LINK, link_header.parse()?);
     }
 
-    (
+    Ok((
         StatusCode::OK,
         headers,
         response_body
-    )
+    ).into_response())
 }

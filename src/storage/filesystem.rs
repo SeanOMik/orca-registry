@@ -1,6 +1,6 @@
 use std::{path::Path, io::ErrorKind};
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -53,7 +53,7 @@ impl StorageDriver for FilesystemDriver {
 
             len += bytes.len();
 
-            file.write_all(&bytes).await.unwrap();
+            file.write_all(&bytes).await?;
         }
 
         Ok(len)
@@ -140,9 +140,12 @@ impl StorageDriver for FilesystemDriver {
     async fn replace_digest(&self, uuid: &str, digest: &str) -> anyhow::Result<()> {
         let path = self.get_digest_path(uuid);
         let path = Path::new(&path);
-        let parent = path.clone().parent().unwrap();
+        let parent = path
+            .clone()
+            .parent()
+            .ok_or(anyhow!("Failure to get parent path of digest file!"))?;
 
-        fs::rename(path, format!("{}/{}", parent.as_os_str().to_str().unwrap(), digest)).await?;
+        fs::rename(path, format!("{}/{}", parent.display(), digest)).await?;
 
         Ok(())
     }

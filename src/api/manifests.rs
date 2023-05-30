@@ -3,22 +3,23 @@ use std::sync::Arc;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum::response::{Response, IntoResponse};
-use axum::http::{StatusCode, HeaderMap, HeaderName, header};
+use axum::http::{StatusCode, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
-use crate::auth::{unauthenticated_response, AuthDriver};
+use crate::auth::unauthenticated_response;
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
 use crate::dto::digest::Digest;
 use crate::dto::manifest::Manifest;
 use crate::dto::user::{UserAuth, Permission};
+use crate::error::AppError;
 
-pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>, body: String) -> Response {
+pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>, body: String) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
-        return unauthenticated_response(&state.config);
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
+        return Ok(unauthenticated_response(&state.config));
     }
     drop(auth_driver);
 
@@ -29,45 +30,45 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     let database = &state.database;
 
     // Create the image repository and save the image manifest. This repository will be private by default
-    database.save_repository(&name, RepositoryVisibility::Private, None).await.unwrap();
-    database.save_manifest(&name, &calculated_digest, &body).await.unwrap();
+    database.save_repository(&name, RepositoryVisibility::Private, None).await?;
+    database.save_manifest(&name, &calculated_digest, &body).await?;
 
     // If the reference is not a digest, then it must be a tag name.
     if !Digest::is_digest(&reference) {
-        database.save_tag(&name, &reference, &calculated_digest).await.unwrap();
+        database.save_tag(&name, &reference, &calculated_digest).await?;
     }
 
     info!("Saved manifest {}", calculated_digest);
 
-    match serde_json::from_str(&body).unwrap() {
+    match serde_json::from_str(&body)? {
         Manifest::Image(image) => {
             // Link the manifest to the image layer
-            database.link_manifest_layer(&calculated_digest, &image.config.digest).await.unwrap();
+            database.link_manifest_layer(&calculated_digest, &image.config.digest).await?;
             debug!("Linked manifest {} to layer {}", calculated_digest, image.config.digest);
 
             for layer in image.layers {
-                database.link_manifest_layer(&calculated_digest, &layer.digest).await.unwrap();
+                database.link_manifest_layer(&calculated_digest, &layer.digest).await?;
                 debug!("Linked manifest {} to layer {}", calculated_digest, image.config.digest);
             }
 
-            (
+            Ok((
                 StatusCode::CREATED,
                 [ (HeaderName::from_static("docker-content-digest"), calculated_digest) ]
-            ).into_response()
+            ).into_response())
         },
         Manifest::List(_list) => {
             warn!("ManifestList request was received!");
 
-            StatusCode::NOT_IMPLEMENTED.into_response()
+            Ok(StatusCode::NOT_IMPLEMENTED.into_response())
         }
     }
 }
 
-pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
     // Check if the user has permission to pull, or that the repository is public
     let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
-        return unauthenticated_response(&state.config);
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
+        return Ok(unauthenticated_response(&state.config));
     }
     drop(auth_driver);
     
@@ -76,24 +77,24 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
         true => reference.clone(),
         false => {
             debug!("Attempting to get manifest digest using tag (repository={}, reference={})", name, reference);
-            if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
+            if let Some(tag) = database.get_tag(&name, &reference).await? {
                 tag.manifest_digest
             } else {
-                return StatusCode::NOT_FOUND.into_response();
+                return Ok(StatusCode::NOT_FOUND.into_response());
             }
         }
     };
 
-    let manifest_content = database.get_manifest(&name, &digest).await.unwrap();
+    let manifest_content = database.get_manifest(&name, &digest).await?;
     if manifest_content.is_none() {
         debug!("Failed to get manifest in repo {}, for digest {}", name, digest);
         // The digest that was provided in the request was invalid.
         // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
-        return StatusCode::NOT_FOUND.into_response();
+        return Ok(StatusCode::NOT_FOUND.into_response());
     }
     let manifest_content = manifest_content.unwrap();
 
-    (
+    Ok((
         StatusCode::OK,
         [
             (HeaderName::from_static("docker-content-digest"), digest),
@@ -103,14 +104,14 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
             (HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string()),
         ],
         manifest_content
-    ).into_response()
+    ).into_response())
 }
 
-pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
     // Check if the user has permission to pull, or that the repository is public
     let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await.unwrap() {
-        return unauthenticated_response(&state.config);
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
+        return Ok(unauthenticated_response(&state.config));
     }
     drop(auth_driver);
     
@@ -119,23 +120,23 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
     let digest = match Digest::is_digest(&reference) {
         true => reference.clone(),
         false => {
-            if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
+            if let Some(tag) = database.get_tag(&name, &reference).await? {
                 tag.manifest_digest
             } else {
-                return StatusCode::NOT_FOUND.into_response();
+                return Ok(StatusCode::NOT_FOUND.into_response());
             }
         }
     };
 
-    let manifest_content = database.get_manifest(&name, &digest).await.unwrap();
+    let manifest_content = database.get_manifest(&name, &digest).await?;
     if manifest_content.is_none() {
         // The digest that was provided in the request was invalid.
         // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
-        return StatusCode::NOT_FOUND.into_response();
+        return Ok(StatusCode::NOT_FOUND.into_response());
     }
     let manifest_content = manifest_content.unwrap();
 
-    (
+    Ok((
         StatusCode::OK,
         [
             (HeaderName::from_static("docker-content-digest"), digest),
@@ -144,43 +145,41 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
             (HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string()),
         ],
         manifest_content
-    ).into_response()
+    ).into_response())
 }
 
-pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, headers: HeaderMap, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Response {
+pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await.unwrap() {
-        return unauthenticated_response(&state.config);
+    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
+        return Ok(unauthenticated_response(&state.config));
     }
     drop(auth_driver);
-    
-    let _authorization = headers.get("Authorization").unwrap(); // TODO: use authorization header
 
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
         true => {
             // Check if the manifest exists
-            if database.get_manifest(&name, &reference).await.unwrap().is_none() {
-                return StatusCode::NOT_FOUND.into_response();
+            if database.get_manifest(&name, &reference).await?.is_none() {
+                return Ok(StatusCode::NOT_FOUND.into_response());
             }
 
             reference.clone()
         },
         false => {
-            if let Some(tag) = database.get_tag(&name, &reference).await.unwrap() {
+            if let Some(tag) = database.get_tag(&name, &reference).await? {
                 tag.manifest_digest
             } else {
-                return StatusCode::NOT_FOUND.into_response();
+                return Ok(StatusCode::NOT_FOUND.into_response());
             }
         }
     };
 
-    database.delete_manifest(&name, &digest).await.unwrap();
+    database.delete_manifest(&name, &digest).await?;
 
-    (
+    Ok((
         StatusCode::ACCEPTED,
         [
             (header::CONTENT_LENGTH, "None"),
         ],
-    ).into_response()
+    ).into_response())
 }

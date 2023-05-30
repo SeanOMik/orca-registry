@@ -1,8 +1,8 @@
 pub mod ldap_driver;
 
-use std::{collections::HashSet, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
 
-use axum::{extract::{State, Path}, http::{StatusCode, HeaderMap, header, HeaderName, Request}, middleware::Next, response::{Response, IntoResponse}};
+use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Request}, middleware::Next, response::{Response, IntoResponse}};
 
 use sqlx::{Pool, Sqlite};
 use tracing::debug;
@@ -101,7 +101,7 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
 
     // If the token is not valid, return an unauthorized response
     let database = &state.database;
-    if let Some(user) = database.verify_user_token(token.to_string()).await.unwrap() {
+    if let Ok(Some(user)) = database.verify_user_token(token.to_string()).await {
         debug!("Authenticated user through middleware: {}", user.user.username);
 
         request.extensions_mut().insert(user);

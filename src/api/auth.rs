@@ -56,9 +56,9 @@ fn create_jwt_token(account: &str) -> anyhow::Result<TokenInfo> {
     claims.insert("subject", &account);
     //claims.insert("audience", auth.service);
 
-    let not_before = format!("{}", now_secs - 10);
+    let not_before = format!("{}", now_secs);
     let issued_at = format!("{}", now_secs);
-    let expiration = format!("{}", now_secs + 20);
+    let expiration = format!("{}", now_secs + 86400); // 1 day
     claims.insert("notbefore", &not_before);
     claims.insert("issuedat", &issued_at);
     claims.insert("expiration", &expiration); // TODO: 20 seconds expiry for testing
@@ -75,7 +75,7 @@ fn create_jwt_token(account: &str) -> anyhow::Result<TokenInfo> {
     Ok(TokenInfo::new(token_str, expiration, issued_at))
 }
 
-pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppState>>, Query(params): Query<HashMap<String, String>>, form: Option<Form<AuthForm>>) -> Response {
+pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppState>>, Query(params): Query<HashMap<String, String>>, form: Option<Form<AuthForm>>) -> Result<Response, StatusCode> {
     let mut auth = TokenAuthRequest {
         user: None,
         password: None,
@@ -117,7 +117,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
         info!("Auth failure! Auth was not provided in either AuthBasic or Form!");
 
         // Maybe BAD_REQUEST should be returned?
-        return (StatusCode::UNAUTHORIZED).into_response();
+        return Err(StatusCode::UNAUTHORIZED);
     }
 
     // Create logging span for the rest of this request
@@ -133,7 +133,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
             if account != user {
                 error!("`user` and `account` are not the same!!! (user: {}, account: {})", user, account);
                 
-                return (StatusCode::BAD_REQUEST).into_response();
+                return Err(StatusCode::BAD_REQUEST);
             }
         }
 
@@ -149,7 +149,14 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
     if let Some(scope) = params.get("scope") {
         
         // TODO: Handle multiple scopes
-        auth.scope.push(Scope::try_from(&scope[..]).unwrap());
+        match Scope::try_from(&scope[..]) {
+            Ok(scope) => {
+                auth.scope.push(scope);
+            },
+            Err(_) => {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
     }
 
     // Get offline token and attempt to convert it to a boolean
@@ -168,17 +175,19 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
     if let (Some(account), Some(password)) = (&auth.account, auth.password) {
         // Ensure that the password is correct
         let mut auth_driver = state.auth_checker.lock().await;
-        if !auth_driver.verify_user_login(account.clone(), password).await.unwrap() {
+        if !auth_driver.verify_user_login(account.clone(), password).await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
             debug!("Authentication failed, incorrect password!");
             
-            return unauthenticated_response(&state.config);
+            return Ok(unauthenticated_response(&state.config));
         }
         drop(auth_driver);
 
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token = create_jwt_token(account).unwrap();
+        let token = create_jwt_token(account)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let token_str = token.token;
 
         debug!("Created jwt token");
@@ -194,23 +203,25 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
             issued_at: now_format,
         };
 
-        let json_str = serde_json::to_string(&auth_response).unwrap();
+        let json_str = serde_json::to_string(&auth_response)
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
 
         let database = &state.database;
-        database.store_user_token(token_str.clone(), account.clone(), token.expiry, token.created_at).await.unwrap();
+        database.store_user_token(token_str.clone(), account.clone(), token.expiry, token.created_at).await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         drop(database);
 
-        return (
+        return Ok((
             StatusCode::OK,
             [
                 ( header::CONTENT_TYPE, "application/json" ),
                 ( header::AUTHORIZATION, &format!("Bearer {}", token_str) )
             ],
             json_str
-        ).into_response();
+        ).into_response());
     }
 
     info!("Auth failure! Not enough information given to create auth token!");
     // If we didn't get fields required to make a token, then the client did something bad
-    (StatusCode::UNAUTHORIZED).into_response()
+    Err(StatusCode::UNAUTHORIZED)
 }

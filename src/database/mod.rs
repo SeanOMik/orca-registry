@@ -12,47 +12,48 @@ pub trait Database {
     // Digest related functions
 
     /// Create the tables in the database
-    async fn create_schema(&self) -> sqlx::Result<()>;
+    async fn create_schema(&self) -> anyhow::Result<()>;
 
     // Tag related functions
 
     /// Get tags associated with a repository
-    async fn list_repository_tags(&self, repository: &str,) -> sqlx::Result<Vec<Tag>>;
-    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> sqlx::Result<Vec<Tag>>;
+    async fn list_repository_tags(&self, repository: &str,) -> anyhow::Result<Vec<Tag>>;
+    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> anyhow::Result<Vec<Tag>>;
     /// Get a manifest digest using the tag name.
-    async fn get_tag(&self, repository: &str, tag: &str) -> sqlx::Result<Option<Tag>>;
+    async fn get_tag(&self, repository: &str, tag: &str) -> anyhow::Result<Option<Tag>>;
     /// Save a tag and reference it to the manifest digest.
-    async fn save_tag(&self, repository: &str, tag: &str, manifest_digest: &str) -> sqlx::Result<()>;
+    async fn save_tag(&self, repository: &str, tag: &str, manifest_digest: &str) -> anyhow::Result<()>;
     /// Delete a tag.
-    async fn delete_tag(&self, repository: &str, tag: &str) -> sqlx::Result<()>;
+    async fn delete_tag(&self, repository: &str, tag: &str) -> anyhow::Result<()>;
 
     // Manifest related functions
 
     /// Get a manifest's content.
-    async fn get_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<Option<String>>;
+    async fn get_manifest(&self, repository: &str, digest: &str) -> anyhow::Result<Option<String>>;
     /// Save a manifest's content.
-    async fn save_manifest(&self, repository: &str, digest: &str, content: &str) -> sqlx::Result<()>;
+    async fn save_manifest(&self, repository: &str, digest: &str, content: &str) -> anyhow::Result<()>;
     /// Delete a manifest
     /// Returns digests that this manifest pointed to.
-    async fn delete_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<Vec<String>>;
-    async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
-    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()>;
+    async fn delete_manifest(&self, repository: &str, digest: &str) -> anyhow::Result<Vec<String>>;
+    async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> anyhow::Result<()>;
+    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> anyhow::Result<()>;
 
     // Repository related functions
 
-    async fn has_repository(&self, repository: &str) -> sqlx::Result<bool>;
+    async fn has_repository(&self, repository: &str) -> anyhow::Result<bool>;
     async fn get_repository_visibility(&self, repository: &str) -> anyhow::Result<Option<RepositoryVisibility>>;
     /// Create a repository
-    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> sqlx::Result<()>;
+    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> anyhow::Result<()>;
     /// List all repositories. 
     /// If limit is not specified, a default limit of 1000 will be returned.
-    async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> sqlx::Result<Vec<String>>;
+    async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> anyhow::Result<Vec<String>>;
 
 
     /// User stuff
-    async fn does_user_exist(&self, email: String) -> sqlx::Result<bool>;
-    async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> sqlx::Result<User>;
-    async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> sqlx::Result<()>;
+    async fn does_user_exist(&self, email: String) -> anyhow::Result<bool>;
+    async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> anyhow::Result<User>;
+    async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> anyhow::Result<()>;
+    async fn set_user_registry_type(&self, email: String, user_type: RegistryUserType) -> anyhow::Result<()>;
     async fn verify_user_login(&self, email: String, password: String) -> anyhow::Result<bool>;
     async fn get_user_registry_type(&self, email: String) -> anyhow::Result<Option<RegistryUserType>>;
     async fn get_user_repo_permissions(&self, email: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>>;
@@ -63,7 +64,7 @@ pub trait Database {
 
 #[async_trait]
 impl Database for Pool<Sqlite> {
-    async fn create_schema(&self) -> sqlx::Result<()> {
+    async fn create_schema(&self) -> anyhow::Result<()> {
         sqlx::query(include_str!("schemas/schema.sql"))
             .execute(self).await?;
 
@@ -72,7 +73,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()> {
+    async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> anyhow::Result<()> {
         sqlx::query("INSERT INTO manifest_layers(manifest, layer_digest) VALUES (?, ?)")
             .bind(manifest_digest)
             .bind(layer_digest)
@@ -83,7 +84,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> sqlx::Result<()> {
+    async fn unlink_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM manifest_layers WHERE manifest = ? AND layer_digest = ?")
             .bind(manifest_digest)
             .bind(layer_digest)
@@ -94,7 +95,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn list_repository_tags(&self, repository: &str,) -> sqlx::Result<Vec<Tag>> {
+    async fn list_repository_tags(&self, repository: &str,) -> anyhow::Result<Vec<Tag>> {
         let rows: Vec<(String, String, i64, )> = sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ?")
                 .bind(repository)
                 .fetch_all(self).await?;
@@ -108,7 +109,7 @@ impl Database for Pool<Sqlite> {
         Ok(tags)
     }
 
-    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> sqlx::Result<Vec<Tag>> {
+    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> anyhow::Result<Vec<Tag>> {
         // Query differently depending on if `last_tag` was specified
         let rows: Vec<(String, String, i64, )> = match last_tag {
             Some(last_tag) => {
@@ -135,7 +136,7 @@ impl Database for Pool<Sqlite> {
         Ok(tags)
     }
 
-    async fn get_tag(&self, repository: &str, tag: &str) -> sqlx::Result<Option<Tag>> {
+    async fn get_tag(&self, repository: &str, tag: &str) -> anyhow::Result<Option<Tag>> {
         debug!("get tag");
         let row: (String, i64, ) = match sqlx::query_as("SELECT image_manifest, last_updated FROM image_tags WHERE name = ? AND repository = ?")
                 .bind(tag)
@@ -147,7 +148,7 @@ impl Database for Pool<Sqlite> {
                     return Ok(None)
                 },
                 _ => {
-                    return Err(e);
+                    return Err(anyhow::Error::new(e));
                 }
             }
         };
@@ -157,7 +158,7 @@ impl Database for Pool<Sqlite> {
         Ok(Some(Tag::new(tag.to_string(), repository.to_string(), last_updated, row.0)))
     }
     
-    async fn save_tag(&self, repository: &str, tag: &str, digest: &str) -> sqlx::Result<()> {
+    async fn save_tag(&self, repository: &str, tag: &str, digest: &str) -> anyhow::Result<()> {
         sqlx::query("INSERT INTO image_tags (name, repository, image_manifest, last_updated) VALUES (?, ?, ?, ?)")
             .bind(tag)
             .bind(repository)
@@ -168,7 +169,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn delete_tag(&self, repository: &str, tag: &str) -> sqlx::Result<()> {
+    async fn delete_tag(&self, repository: &str, tag: &str) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM image_tags WHERE 'name' = ? AND repository = ?")
             .bind(tag)
             .bind(repository)
@@ -177,7 +178,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn get_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<Option<String>> {
+    async fn get_manifest(&self, repository: &str, digest: &str) -> anyhow::Result<Option<String>> {
         let row: (String, ) = match sqlx::query_as("SELECT content FROM image_manifests where digest = ? AND repository = ?")
                 .bind(digest)
                 .bind(repository)
@@ -188,7 +189,7 @@ impl Database for Pool<Sqlite> {
                     return Ok(None)
                 },
                 _ => {
-                    return Err(e);
+                    return Err(anyhow::Error::new(e));
                 }
             }
         };
@@ -196,7 +197,7 @@ impl Database for Pool<Sqlite> {
         Ok(Some(row.0))
     }
 
-    async fn save_manifest(&self, repository: &str, digest: &str, manifest: &str) -> sqlx::Result<()> {
+    async fn save_manifest(&self, repository: &str, digest: &str, manifest: &str) -> anyhow::Result<()> {
         sqlx::query("INSERT INTO image_manifests (digest, repository, content) VALUES (?, ?, ?)")
             .bind(digest)
             .bind(repository)
@@ -206,7 +207,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn delete_manifest(&self, repository: &str, digest: &str) -> sqlx::Result<Vec<String>> {
+    async fn delete_manifest(&self, repository: &str, digest: &str) -> anyhow::Result<Vec<String>> {
         sqlx::query("DELETE FROM image_manifests where digest = ? AND repository = ?")
             .bind(digest)
             .bind(repository)
@@ -234,7 +235,7 @@ impl Database for Pool<Sqlite> {
         Ok(digests)
     }
 
-    async fn has_repository(&self, repository: &str) -> sqlx::Result<bool> {
+    async fn has_repository(&self, repository: &str) -> anyhow::Result<bool> {
         let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) FROM repositories WHERE \"name\" = ?")
                 .bind(repository)
                 .fetch_one(self).await {
@@ -244,7 +245,7 @@ impl Database for Pool<Sqlite> {
                     return Ok(false)
                 },
                 _ => {
-                    return Err(e);
+                    return Err(anyhow::Error::new(e));
                 }
             }
         };
@@ -270,7 +271,7 @@ impl Database for Pool<Sqlite> {
         Ok(Some(RepositoryVisibility::try_from(row.0)?))
     }
 
-    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> sqlx::Result<()> {
+    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> anyhow::Result<()> {
         // ensure that the repository was not already created
         if self.has_repository(repository).await? {
             debug!("repo exists");
@@ -297,8 +298,8 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    //async fn list_repositories(&self) -> sqlx::Result<Vec<String>> {
-    async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> sqlx::Result<Vec<String>> {
+    //async fn list_repositories(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> anyhow::Result<Vec<String>> {
         let limit = limit.unwrap_or(1000); // set default limit
 
         // Query differently depending on if `last_repo` was specified
@@ -322,7 +323,7 @@ impl Database for Pool<Sqlite> {
         Ok(repos)
     }
 
-    async fn does_user_exist(&self, email: String) -> sqlx::Result<bool> {
+    async fn does_user_exist(&self, email: String) -> anyhow::Result<bool> {
         let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) FROM users WHERE \"email\" = ?")
                 .bind(email)
                 .fetch_one(self).await {
@@ -332,7 +333,7 @@ impl Database for Pool<Sqlite> {
                     return Ok(false)
                 },
                 _ => {
-                    return Err(e);
+                    return Err(anyhow::Error::new(e));
                 }
             }
         };
@@ -340,7 +341,7 @@ impl Database for Pool<Sqlite> {
         Ok(row.0 > 0)
     }
 
-    async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> sqlx::Result<User> {
+    async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> anyhow::Result<User> {
         let username = username.to_lowercase();
         let email = email.to_lowercase();
         sqlx::query("INSERT INTO users (username, email, login_source) VALUES (?, ?, ?)")
@@ -352,12 +353,22 @@ impl Database for Pool<Sqlite> {
         Ok(User::new(username, email, login_source))
     }
 
-    async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> sqlx::Result<()> {
+    async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> anyhow::Result<()> {
         let email = email.to_lowercase();
         sqlx::query("INSERT INTO user_logins (email, password_hash, password_salt) VALUES (?, ?, ?)")
             .bind(email.clone())
             .bind(password_hash)
             .bind(password_salt)
+            .execute(self).await?;
+
+        Ok(())
+    }
+
+    async fn set_user_registry_type(&self, email: String, user_type: RegistryUserType) -> anyhow::Result<()> {
+        let email = email.to_lowercase();
+        sqlx::query("INSERT INTO user_registry_permissions (email, user_type) VALUES (?, ?)")
+            .bind(email.clone())
+            .bind(user_type as u32)
             .execute(self).await?;
 
         Ok(())
@@ -410,10 +421,17 @@ impl Database for Pool<Sqlite> {
             }
         };
 
-        let vis = self.get_repository_visibility(&repository).await?.unwrap();
+        let vis = match self.get_repository_visibility(&repository).await? {
+            Some(v) => v,
+            None => return Ok(None),
+        };
 
         // Also get the user type for the registry, if its admin return admin repository permissions
-        let utype = self.get_user_registry_usertype(email).await?.unwrap(); // unwrap should be safe
+        let utype = match self.get_user_registry_usertype(email).await? {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
         if utype == RegistryUserType::Admin {
             Ok(Some(RepositoryPermissions::new(Permission::ADMIN.bits(), vis)))
         } else {
@@ -479,11 +497,15 @@ impl Database for Pool<Sqlite> {
             .bind(email.clone())
             .fetch_one(self).await?; */
 
-        let (expiry, created_at) = (Utc.timestamp_millis_opt(expiry).unwrap(), Utc.timestamp_millis_opt(created_at).unwrap());
-        let user = User::new(email, user_row.0, LoginSource::try_from(user_row.1)?);
-        let token = TokenInfo::new(token, expiry, created_at);
-        let auth = UserAuth::new(user, token);
+        let (expiry, created_at) = (Utc.timestamp_millis_opt(expiry).single(), Utc.timestamp_millis_opt(created_at).single());
+        if let (Some(expiry), Some(created_at)) = (expiry, created_at) {
+            let user = User::new(email, user_row.0, LoginSource::try_from(user_row.1)?);
+            let token = TokenInfo::new(token, expiry, created_at);
+            let auth = UserAuth::new(user, token);
 
-        Ok(Some(auth))
+            Ok(Some(auth))
+        } else {
+            Ok(None)
+        }
     }
 }

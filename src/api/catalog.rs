@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use axum::{extract::{State, Query}, http::{StatusCode, header, HeaderMap, HeaderName}, response::IntoResponse};
+use axum::{extract::{State, Query}, http::{StatusCode, header, HeaderMap, HeaderName}, response::{IntoResponse, Response}};
 use serde::{Serialize, Deserialize};
 
-use crate::{app_state::AppState, database::Database};
+use crate::{app_state::AppState, database::Database, error::AppError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,7 +20,7 @@ pub struct ListRepositoriesParams {
     last_repo: Option<String>,
 }
 
-pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
@@ -30,7 +30,7 @@ pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, sta
 
             // Convert the last param to a String, and list all the repos
             let last_repo = params.last_repo.and_then(|t| Some(t.to_string()));
-            let repos = database.list_repositories(Some(limit), last_repo).await.unwrap();
+            let repos = database.list_repositories(Some(limit), last_repo).await?;
 
             // Get the new last repository for the response
             let last_repo = repos.last().and_then(|s| Some(s.clone()));
@@ -47,7 +47,7 @@ pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, sta
             repos
         },
         None => {
-            database.list_repositories(None, None).await.unwrap()
+            database.list_repositories(None, None).await?
         }
     };
 
@@ -55,20 +55,20 @@ pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, sta
     let repo_list = RepositoryList {
         repositories,
     };
-    let response_body = serde_json::to_string(&repo_list).unwrap();
+    let response_body = serde_json::to_string(&repo_list)?;
     
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
+    headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse()?);
 
     if let Some(link_header) = link_header {
-        headers.insert(header::LINK, link_header.parse().unwrap());
+        headers.insert(header::LINK, link_header.parse()?);
     }
 
     // Construct the response, optionally adding the Link header if it was constructed.
-    (
+    Ok((
         StatusCode::OK,
         headers,
         response_body
-    )
+    ).into_response())
 }
