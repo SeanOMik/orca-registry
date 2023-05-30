@@ -128,6 +128,7 @@ pub struct RegistryUser {
     repository_permissions: HashMap<String, RepositoryPermissions>,
 }
 
+#[allow(dead_code)]
 impl RegistryUser {
     pub fn new(user_type: RegistryUserType, repository_permissions: HashMap<String, RepositoryPermissions>) -> Self {
         Self {

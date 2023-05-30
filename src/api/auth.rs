@@ -1,4 +1,4 @@
-use std::{sync::Arc, collections::{HashMap, BTreeMap}, time::{SystemTime, UNIX_EPOCH}};
+use std::{sync::Arc, collections::{HashMap, BTreeMap}, time::SystemTime};
 
 use axum::{extract::{Query, State}, response::{IntoResponse, Response}, http::{StatusCode, header}, Form};
 use axum_auth::AuthBasic;
@@ -12,10 +12,10 @@ use sha2::Sha256;
 
 use rand::Rng;
 
-use crate::{dto::{scope::Scope, user::{UserAuth, TokenInfo}}, app_state::AppState};
+use crate::{dto::{scope::Scope, user::TokenInfo}, app_state::AppState};
 use crate::database::Database;
 
-use crate::auth::{unauthenticated_response, AuthDriver};
+use crate::auth::unauthenticated_response;
 
 #[derive(Deserialize, Debug)]
 pub struct TokenAuthRequest {

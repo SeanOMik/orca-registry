@@ -14,7 +14,6 @@ pub mod tags;
 pub mod catalog;
 pub mod auth;
 
-use crate::auth::AuthToken;
 use crate::dto::user::UserAuth;
 
 /// https://docs.docker.com/registry/spec/api/#api-version-check
