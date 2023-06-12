@@ -1,4 +1,5 @@
 pub mod ldap_driver;
+pub mod static_driver;
 
 use std::{collections::HashMap, sync::Arc};
 

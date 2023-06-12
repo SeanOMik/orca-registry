@@ -25,8 +25,9 @@ impl Tag {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum RepositoryVisibility {
+    #[default]
     Private = 0,
     Public = 1
 }

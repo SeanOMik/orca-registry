@@ -37,6 +37,8 @@ use database::Database;
 use tracing_subscriber::{filter, EnvFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::auth::static_driver::StaticAuthDriver;
+use crate::dto::user::Permission;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
@@ -184,6 +186,40 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(15)
         .connect_with(connection_options).await?;
     pool.create_schema().await?;
+
+    {
+        let mut driver = StaticAuthDriver::from_file(&config.path.clone().unwrap()).unwrap();
+
+        if driver.verify_user_login("admin".to_string(), "test1234".to_string()).await? {
+            info!("LOGGED IN!");
+
+            if driver.user_has_permission("admin".to_string(), "admin/alpine".to_string(), Permission::PULL, None).await? {
+                info!("user can do that!")
+            } else {
+                info!("user can not do that :(")
+            }
+        } else {
+            info!("not logged in :(");
+        }
+        
+    }
+
+    {
+        let mut driver = StaticAuthDriver::from_file(&config.path.clone().unwrap()).unwrap();
+
+        if driver.verify_user_login("admin".to_string(), "test1234".to_string()).await? {
+            info!("LOGGED IN!");
+
+            if driver.user_has_permission("admin".to_string(), "admin/alpine".to_string(), Permission::PULL, None).await? {
+                info!("user can do that!")
+            } else {
+                info!("user can not do that :(")
+            }
+        } else {
+            info!("not logged in :(");
+        }
+        
+    }
 
     // set jwt key
     config.jwt_key = pool.get_jwt_secret().await?;
