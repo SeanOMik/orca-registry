@@ -23,11 +23,13 @@ use tower_layer::Layer;
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
-use tracing::{debug, Level};
+use tracing::{debug, Level, info};
 
 use app_state::AppState;
 use database::Database;
 
+use crate::auth::static_driver::StaticAuthDriver;
+use crate::dto::user::Permission;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
@@ -72,6 +74,23 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(15)
         .connect("test.db").await?;
     pool.create_schema().await?;
+
+    {
+        let mut driver = StaticAuthDriver::from_file(&config.path.clone().unwrap()).unwrap();
+
+        if driver.verify_user_login("admin".to_string(), "test1234".to_string()).await? {
+            info!("LOGGED IN!");
+
+            if driver.user_has_permission("admin".to_string(), "admin/alpine".to_string(), Permission::PULL, None).await? {
+                info!("user can do that!")
+            } else {
+                info!("user can not do that :(")
+            }
+        } else {
+            info!("not logged in :(");
+        }
+        
+    }
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
     

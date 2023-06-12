@@ -31,6 +31,10 @@ fn default_display_name_attribute() -> String {
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
+    /// The path that the configuration file was deserialized from
+    #[serde(skip)]
+    pub path: Option<String>,
+
     pub listen_address: String,
     pub listen_port: String,
     pub url: Option<String>,
@@ -63,11 +67,16 @@ impl Config {
             .join(Toml::file(format!("{}", path)));
 
         let mut config: Config = figment.extract()?;
+        
+        // Post process config options
+
         if let Some(url) = config.url.as_mut() {
             if url.ends_with("/") {
                 *url = url[..url.len() - 1].to_string();
             }
         }
+
+        config.path = Some(path);
         
         Ok(config)
     }

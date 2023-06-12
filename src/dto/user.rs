@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
 
@@ -82,7 +83,22 @@ bitflags! {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+impl TryFrom<&str> for Permission {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "pull" => Ok(Self::PULL),
+            "push" => Ok(Self::PUSH),
+            "edit" => Ok(Self::EDIT),
+            "admin" => Ok(Self::ADMIN),
+            "*" => Ok(Self::ADMIN),
+            _ => Err(anyhow!("Unknown permission name '{}'!", value)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct RepositoryPermissions {
     perms: u32,
     visibility: RepositoryVisibility
@@ -101,6 +117,12 @@ impl RepositoryPermissions {
     pub fn has_permission(&self, perm: Permission) -> bool {
         let perm = perm.bits();
         self.perms & perm == perm
+    }
+
+    pub fn add_permission(&mut self, perm: Permission) {
+        let perm = perm.bits();
+
+        self.perms |= perm;
     }
 }
 
