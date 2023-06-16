@@ -7,7 +7,7 @@ use axum::http::{StatusCode, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
-use crate::auth::unauthenticated_response;
+use crate::auth::access_denied_response;
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
@@ -19,7 +19,7 @@ use crate::error::AppError;
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>, body: String) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(unauthenticated_response(&state.config));
+        return Ok(access_denied_response(&state.config));
     }
     drop(auth_driver);
 
@@ -68,7 +68,7 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
     // Check if the user has permission to pull, or that the repository is public
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-        return Ok(unauthenticated_response(&state.config));
+        return Ok(access_denied_response(&state.config));
     }
     drop(auth_driver);
     
@@ -111,7 +111,7 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
     // Check if the user has permission to pull, or that the repository is public
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-        return Ok(unauthenticated_response(&state.config));
+        return Ok(access_denied_response(&state.config));
     }
     drop(auth_driver);
     
@@ -151,7 +151,7 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
 pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(unauthenticated_response(&state.config));
+        return Ok(access_denied_response(&state.config));
     }
     drop(auth_driver);
 

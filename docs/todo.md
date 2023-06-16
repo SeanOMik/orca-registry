@@ -10,3 +10,4 @@
 - [ ] simple webui for managing the registry
 - [x] streaming layer bytes into providers
 - [x] streaming layer bytes from providers
+- [ ] better client error messages

@@ -130,6 +130,8 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
     }
 }
 
+/// Creates a response with an Unauthorized (401) status code.
+/// The www-authenticate header is set to notify the client of where to authorize with.
 #[inline(always)]
 pub fn unauthenticated_response(config: &Config) -> Response {
     let bearer = format!("Bearer realm=\"{}/auth\"", config.get_url());
@@ -137,6 +139,18 @@ pub fn unauthenticated_response(config: &Config) -> Response {
         StatusCode::UNAUTHORIZED,
         [
             ( header::WWW_AUTHENTICATE, bearer ),
+            ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
+        ]
+    ).into_response()
+}
+
+/// Creates a response with a Forbidden (403) status code.
+/// No other headers are set.
+#[inline(always)]
+pub fn access_denied_response(config: &Config) -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        [
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
         ]
     ).into_response()
