@@ -187,7 +187,11 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
         let now = SystemTime::now();
         let token = create_jwt_token(account)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| {
+                error!("Failed to create jwt token!");
+
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
         let token_str = token.token;
 
         debug!("Created jwt token");
@@ -208,7 +212,11 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
         let database = &state.database;
         database.store_user_token(token_str.clone(), account.clone(), token.expiry, token.created_at).await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| {
+                error!("Failed to store user token in database!");
+
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
         drop(database);
 
         return Ok((

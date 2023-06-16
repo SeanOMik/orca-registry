@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE TABLE IF NOT EXISTS repositories (
     name TEXT NOT NULL UNIQUE PRIMARY KEY,
     owning_project TEXT,
+    owner_email TEXT,
     -- 0 = private, 1 = public
     visibility INTEGER NOT NULL
 );
@@ -72,4 +73,5 @@ CREATE TABLE IF NOT EXISTS user_tokens (
 
 -- create admin user
 INSERT OR IGNORE INTO users (username, email, login_source) VALUES ('admin', 'admin@example.com', 0);
-INSERT OR IGNORE INTO user_logins (email, password_hash, password_salt) VALUES ('admin@example.com', '$2b$12$x5ECk0jUmOSfBWxW52wsyOmFxNZkwc2J9FH225if4eBnQYUvYLYYq', 'x5ECk0jUmOSfBWxW52wsyO');
+INSERT OR IGNORE INTO user_logins (email, password_hash, password_salt) VALUES ('admin@example.com', '$2y$05$ZBnzGzctboHkUDMr4W02jOaUuPwmRC2OgWKKBxqiQsYv53OkUrfO6', 'x5ECk0jUmOSfBWxW52wsyO');
+INSERT OR IGNORE INTO user_registry_permissions (email, user_type) VALUES ('admin@example.com', 1);

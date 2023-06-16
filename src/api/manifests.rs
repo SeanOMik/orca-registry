@@ -30,7 +30,7 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     let database = &state.database;
 
     // Create the image repository and save the image manifest. This repository will be private by default
-    database.save_repository(&name, RepositoryVisibility::Private, None).await?;
+    database.save_repository(&name, RepositoryVisibility::Private, Some(auth.user.email), None).await?;
     database.save_manifest(&name, &calculated_digest, &body).await?;
 
     // If the reference is not a digest, then it must be a tag name.

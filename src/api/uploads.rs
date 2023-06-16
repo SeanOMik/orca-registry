@@ -41,6 +41,7 @@ pub async fn start_upload_post(Path((name, )): Path<(String, )>, Extension(auth)
 pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, Extension(auth): Extension<UserAuth>, state: State<Arc<AppState>>, mut body: BodyStream) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
+        debug!("user is not authenticated");
         return Ok(unauthenticated_response(&state.config));
     }
     drop(auth_driver);

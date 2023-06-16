@@ -24,14 +24,25 @@ pub trait AuthDriver: Send + Sync {
     async fn verify_user_login(&mut self, email: String, password: String) -> anyhow::Result<bool>;
 }
 
+// Implement AuthDriver for anything the implements Database
 #[async_trait]
-impl AuthDriver for Pool<Sqlite> {
+impl<T> AuthDriver for T 
+where
+    T: Database + Send + Sync
+{
     async fn user_has_permission(&mut self, email: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool> {
-        let allowed_to = {
-            match self.get_user_registry_type(email.clone()).await? {
-                Some(RegistryUserType::Admin) => true,
-                _ => {
-                    check_user_permissions(self, email, repository, permission, required_visibility).await?
+        let allowed_to: bool = {
+            if self.get_repository_owner(&repository).await?
+                .map_or(false, |owner| owner == email) {
+            
+                debug!("Allowing request, user is owner of repository");
+                true
+            } else {
+                match self.get_user_registry_type(email.clone()).await? {
+                    Some(RegistryUserType::Admin) => true,
+                    _ => {
+                        check_user_permissions(self, email, repository, permission, required_visibility).await?
+                    }
                 }
             }
         };

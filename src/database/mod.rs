@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use sqlx::{Sqlite, Pool};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use chrono::{DateTime, Utc, NaiveDateTime, TimeZone};
 
@@ -42,8 +42,9 @@ pub trait Database {
 
     async fn has_repository(&self, repository: &str) -> anyhow::Result<bool>;
     async fn get_repository_visibility(&self, repository: &str) -> anyhow::Result<Option<RepositoryVisibility>>;
+    async fn get_repository_owner(&self, repository: &str) -> anyhow::Result<Option<String>>;
     /// Create a repository
-    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> anyhow::Result<()>;
+    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owner_email: Option<String>, owning_project: Option<String>) -> anyhow::Result<()>;
     /// List all repositories. 
     /// If limit is not specified, a default limit of 1000 will be returned.
     async fn list_repositories(&self, limit: Option<u32>, last_repo: Option<String>) -> anyhow::Result<Vec<String>>;
@@ -52,6 +53,7 @@ pub trait Database {
     /// User stuff
     async fn does_user_exist(&self, email: String) -> anyhow::Result<bool>;
     async fn create_user(&self, email: String, username: String, login_source: LoginSource) -> anyhow::Result<User>;
+    async fn get_user(&self, email: String) -> anyhow::Result<Option<User>>;
     async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> anyhow::Result<()>;
     async fn set_user_registry_type(&self, email: String, user_type: RegistryUserType) -> anyhow::Result<()>;
     async fn verify_user_login(&self, email: String, password: String) -> anyhow::Result<bool>;
@@ -254,7 +256,7 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn get_repository_visibility(&self, repository: &str) -> anyhow::Result<Option<RepositoryVisibility>> {
-        let row: (u32, ) = match sqlx::query_as("SELECT visibility FROM repositories WHERE 'name' = ?")
+        let row: (u32, ) = match sqlx::query_as("SELECT visibility FROM repositories WHERE name = ?")
                 .bind(repository)
                 .fetch_one(self).await {
             Ok(row) => row,
@@ -271,29 +273,42 @@ impl Database for Pool<Sqlite> {
         Ok(Some(RepositoryVisibility::try_from(row.0)?))
     }
 
-    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owning_project: Option<String>) -> anyhow::Result<()> {
+    async fn get_repository_owner(&self, repository: &str) -> anyhow::Result<Option<String>> {
+        let row: (String, ) = match sqlx::query_as("SELECT owner_email FROM repositories WHERE name = ?")
+                .bind(repository)
+                .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    debug!("here's the error: {:?}", e);
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        Ok(Some(row.0))
+    }
+
+    async fn save_repository(&self, repository: &str, visibility: RepositoryVisibility, owner_email: Option<String>, owning_project: Option<String>) -> anyhow::Result<()> {
         // ensure that the repository was not already created
         if self.has_repository(repository).await? {
-            debug!("repo exists");
+            debug!("Skipping creation of repository since it already exists");
             return Ok(());
         }
-        debug!("repo does not exist");
 
-        match owning_project {
-            Some(owner) => {
-                sqlx::query("INSERT INTO repositories (name, visibility, owning_project) VALUES (?, ?, ?)")
-                    .bind(repository)
-                    .bind(visibility as u32)
-                    .bind(owner)
-                    .execute(self).await?;
-            },
-            None => {
-                sqlx::query("INSERT INTO repositories (name, visibility) VALUES (?, ?)")
-                    .bind(repository)
-                    .bind(visibility as u32)
-                    .execute(self).await?;
-            }
-        }
+        // unwrap None values to empty for inserting into database
+        let owner_email = owner_email.unwrap_or(String::new());
+        let owning_project = owning_project.unwrap_or(String::new());
+
+        sqlx::query("INSERT INTO repositories (name, visibility, owner_email, owning_project) VALUES (?, ?, ?, ?)")
+            .bind(repository)
+            .bind(visibility as u32)
+            .bind(owner_email)
+            .bind(owning_project)
+            .execute(self).await?;
 
         Ok(())
     }
@@ -353,6 +368,25 @@ impl Database for Pool<Sqlite> {
         Ok(User::new(username, email, login_source))
     }
 
+    async fn get_user(&self, email: String) -> anyhow::Result<Option<User>> {
+        let email = email.to_lowercase();
+        let row: (String, u32) = match sqlx::query_as("SELECT username, login_source FROM users WHERE email = ?")
+            .bind(email.clone())
+            .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(None)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        Ok(Some(User::new(row.0, email, LoginSource::try_from(row.1)?)))
+    }
+
     async fn add_user_auth(&self, email: String, password_hash: String, password_salt: String) -> anyhow::Result<()> {
         let email = email.to_lowercase();
         sqlx::query("INSERT INTO user_logins (email, password_hash, password_salt) VALUES (?, ?, ?)")
@@ -376,7 +410,7 @@ impl Database for Pool<Sqlite> {
 
     async fn verify_user_login(&self, email: String, password: String) -> anyhow::Result<bool> {
         let email = email.to_lowercase();
-        let row: (String, ) = sqlx::query_as("SELECT password_hash FROM users WHERE email = ?")
+        let row: (String, ) = sqlx::query_as("SELECT password_hash FROM user_logins WHERE email = ?")
             .bind(email)
             .fetch_one(self).await?;
 
@@ -405,6 +439,8 @@ impl Database for Pool<Sqlite> {
 
     async fn get_user_repo_permissions(&self, email: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>> {
         let email = email.to_lowercase();
+
+        debug!("email: {email}, repo: {repository}");
         
         let row: (u32, ) = match sqlx::query_as("SELECT repository_permissions FROM user_repo_permissions WHERE email = ? AND repository_name = ?")
                 .bind(email.clone())
@@ -423,13 +459,17 @@ impl Database for Pool<Sqlite> {
 
         let vis = match self.get_repository_visibility(&repository).await? {
             Some(v) => v,
-            None => return Ok(None),
+            None => {
+                warn!("Failure to find visibility for repository '{}'", repository);
+                return Ok(None)
+            },
         };
 
         // Also get the user type for the registry, if its admin return admin repository permissions
         let utype = match self.get_user_registry_usertype(email).await? {
             Some(t) => t,
-            None => return Ok(None),
+            // assume a regular user is their type is not found
+            None => RegistryUserType::Regular,
         };
 
         if utype == RegistryUserType::Admin {

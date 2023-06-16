@@ -25,6 +25,11 @@ impl FilesystemDriver {
     fn get_digest_path(&self, digest: &str) -> String {
         format!("{}/{}", self.storage_path, digest)
     }
+
+    fn ensure_storage_path(&self) -> std::io::Result<()>
+    {
+        std::fs::create_dir_all(&self.storage_path)
+    }
 }
 
 #[async_trait]
@@ -40,6 +45,8 @@ impl StorageDriver for FilesystemDriver {
     }
 
     async fn save_digest_stream(&self, digest: &str, mut stream: ByteStream, append: bool) -> anyhow::Result<usize> {
+        self.ensure_storage_path()?;
+
         let path = self.get_digest_path(digest);
         let mut file = fs::OpenOptions::new()
             .write(true)

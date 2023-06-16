@@ -3,7 +3,7 @@ use ldap3::{LdapConnAsync, Ldap, Scope, SearchEntry};
 use sqlx::{Pool, Sqlite};
 use tracing::{debug, warn};
 
-use crate::{config::LdapConnectionConfig, dto::{user::{Permission, LoginSource, RegistryUserType}, RepositoryVisibility}, database::Database};
+use crate::{config::LdapConnectionConfig, dto::{user::{Permission, LoginSource, RegistryUserType, self}, RepositoryVisibility}, database::Database};
 
 use super::AuthDriver;
 
@@ -60,6 +60,7 @@ impl AuthDriver for LdapAuthDriver {
             Ok(true)
         } else {
             debug!("LDAP is falling back to database");
+
             // fall back to database auth since this user might be local
             self.database.user_has_permission(email, repository, permission, required_visibility).await
         }

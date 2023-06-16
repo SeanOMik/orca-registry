@@ -3,8 +3,8 @@
 - [x] ldap auth
 - [ ] permission stuff
   - [ ] simple way to define users and their permissions through a "users.toml"
-  - [ ] Only allow users to create repositories if its the same name as their username, or if they're an admin
-  - [ ] Only allow users to pull from their own repositories
+  - [x] Only allow users to create repositories if its the same name as their username, or if they're an admin
+  - [x] Only allow users to pull from their own repositories
 - [ ] postgresql
 - [ ] prometheus metrics
 - [ ] simple webui for managing the registry
