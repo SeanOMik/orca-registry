@@ -2,16 +2,24 @@ listen_address = "127.0.0.1"
 listen_port = "3000"
 url = "http://localhost:3000/"
 
-[ldap]
-connection_url = "ldap://localhost:389"
-bind_dn = "cn=admin,dc=planetexpress,dc=com"
-bind_password = "GoodNewsEveryone"
-user_base_dn = "ou=people,dc=planetexpress,dc=com"
-group_base_dn = "ou=people,dc=planetexpress,dc=com"
+[storage]
+driver = "filesystem"
+path = "/app/blobs"
 
-user_search_filter = "(&(objectClass=person)(mail=%s))"
-group_search_filter = "(&(objectclass=groupOfNames)(member=%d))"
+[database]
+type = "sqlite"
+path = "/app/orca.db"
 
-admin_filter = "(memberOf=cn=admin_staff,ou=people,dc=planetexpress,dc=com)"
+#[ldap]
+#connection_url = "ldap://localhost:389"
+#bind_dn = "cn=admin,dc=planetexpress,dc=com"
+#bind_password = "GoodNewsEveryone"
+#user_base_dn = "ou=people,dc=planetexpress,dc=com"
+#group_base_dn = "ou=people,dc=planetexpress,dc=com"
+#
+#user_search_filter = "(&(objectClass=person)(mail=%s))"
+#group_search_filter = "(&(objectclass=groupOfNames)(member=%d))"
+#
+#admin_filter = "(memberOf=cn=admin_staff,ou=people,dc=planetexpress,dc=com)"
 #login_attribute = "mail"
 #display_name_attribute = "displayName"

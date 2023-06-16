@@ -1,5 +1,6 @@
 /target
 .env
 .vscode
+test.db
 /registry
 config.toml

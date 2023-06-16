@@ -91,7 +91,7 @@ impl Deref for AuthToken {
 type Rejection = (StatusCode, HeaderMap);
 
 pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Request<B>, next: Next<B>) -> Result<Response, Rejection> {
-    let bearer = format!("Bearer realm=\"{}/auth\"", state.config.get_url());
+    let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
     let mut failure_headers = HeaderMap::new();
     failure_headers.append(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
     failure_headers.append(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
@@ -119,7 +119,7 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
 
         Ok(next.run(request).await)
     } else {
-        let bearer = format!("Bearer realm=\"{}/auth\"", state.config.get_url());
+        let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
         Ok((
             StatusCode::UNAUTHORIZED,
             [
@@ -134,7 +134,7 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
 /// The www-authenticate header is set to notify the client of where to authorize with.
 #[inline(always)]
 pub fn unauthenticated_response(config: &Config) -> Response {
-    let bearer = format!("Bearer realm=\"{}/auth\"", config.get_url());
+    let bearer = format!("Bearer realm=\"{}/auth\"", config.url());
     (
         StatusCode::UNAUTHORIZED,
         [

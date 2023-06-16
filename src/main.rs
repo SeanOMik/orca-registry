@@ -18,9 +18,10 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Router, routing};
 use axum::ServiceExt;
+use sqlx::ConnectOptions;
 use tower_layer::Layer;
 
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
 use tracing::{debug, Level};
@@ -31,7 +32,7 @@ use database::Database;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
-use crate::config::Config;
+use crate::config::{Config, DatabaseConfig, StorageConfig};
 
 use tower_http::trace::TraceLayer;
 
@@ -68,12 +69,22 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::new()
         .expect("Failure to parse config!");
 
+    let sqlite_config = match &config.database {
+        DatabaseConfig::Sqlite(sqlite) => sqlite,
+    };
+    
+    let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
+        .journal_mode(SqliteJournalMode::Wal);
     let pool = SqlitePoolOptions::new()
         .max_connections(15)
-        .connect("test.db").await?;
+        .connect_with(connection_options).await?;
     pool.create_schema().await?;
 
-    let storage_driver: Mutex<Box<dyn StorageDriver>> = Mutex::new(Box::new(FilesystemDriver::new("registry/blobs")));
+    let storage_driver: Mutex<Box<dyn StorageDriver>> = match &config.storage {
+        StorageConfig::Filesystem(fs) => {
+            Mutex::new(Box::new(FilesystemDriver::new(&fs.path)))
+        }
+    };
     
     // figure out the auth driver depending on whats specified in the config,
     // the fallback is a database auth driver.
@@ -91,7 +102,6 @@ async fn main() -> anyhow::Result<()> {
 
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
-
     let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 

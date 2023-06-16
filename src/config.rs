@@ -30,11 +30,35 @@ fn default_display_name_attribute() -> String {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct FilesystemDriverConfig {
+    pub path: String,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(tag = "driver", rename_all = "snake_case")]
+pub enum StorageConfig {
+    Filesystem(FilesystemDriverConfig),
+}
+
+#[derive(Deserialize, Clone)]
+pub struct SqliteDbConfig {
+    pub path: String,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DatabaseConfig {
+    Sqlite(SqliteDbConfig),
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
-    pub url: Option<String>,
+    url: Option<String>,
     pub ldap: Option<LdapConnectionConfig>,
+    pub database: DatabaseConfig,
+    pub storage: StorageConfig,
 }
 
 #[allow(dead_code)]
@@ -72,7 +96,7 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_url(&self) -> String {
+    pub fn url(&self) -> String {
         match &self.url {
             Some(u) => u.clone(),
             None => format!("http://{}:{}", self.listen_address, self.listen_port)
