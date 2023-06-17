@@ -34,7 +34,9 @@ ARG GID=1000
 RUN adduser --disabled-password --gecos "" $UNAME -s -G $GID -u $UID
 COPY --from=builder --chown=$UID:$GID /app/src/target/release/orca-registry /app/orca-registry
 
-RUN chown -R $UID:$GID /app
+RUN mkdir /data && \
+    chown -R $UID:$GID /data && \
+    chown -R $UID:$GID /app
 
 USER $UNAME
 

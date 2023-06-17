@@ -24,7 +24,7 @@ use tower_layer::Layer;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
-use tracing::{debug, Level};
+use tracing::{debug, Level, info};
 
 use app_state::AppState;
 use database::Database;
@@ -62,12 +62,12 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resu
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
-
     let config = Config::new()
         .expect("Failure to parse config!");
+
+    tracing_subscriber::fmt()
+        .with_max_level(config.log_level)
+        .init();
 
     let sqlite_config = match &config.database {
         DatabaseConfig::Sqlite(sqlite) => sqlite,
@@ -136,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
 
     let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
 
-    debug!("Starting http server, listening on {}", app_addr);
+    info!("Starting http server, listening on {}", app_addr);
     axum::Server::bind(&app_addr)
         .serve(layered_app.into_make_service())
         .await?;

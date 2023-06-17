@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use figment::{Figment, providers::{Env, Toml, Format}};
 use figment_cliarg_provider::FigmentCliArgsProvider;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use tracing::Level;
 
 use std::env;
 
@@ -56,6 +58,8 @@ pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
+    #[serde(deserialize_with = "serialize_log_level", default = "default_log_level")]
+    pub log_level: Level,
     pub ldap: Option<LdapConnectionConfig>,
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
@@ -103,3 +107,29 @@ impl Config {
         }
     }
 }
+
+fn default_log_level() -> Level {
+    Level::INFO
+}
+
+fn serialize_log_level<'de, D>(deserializer: D) -> Result<Level, D::Error>
+where D: Deserializer<'de> {
+    let s = String::deserialize(deserializer)?.to_lowercase();
+    let s = s.as_str();
+    
+    match s {
+        "error" => Ok(Level::ERROR),
+        "warn" => Ok(Level::WARN),
+        "info" => Ok(Level::INFO),
+        "debug" => Ok(Level::DEBUG),
+        "trace" => Ok(Level::TRACE),
+        _ => Err(serde::de::Error::custom(format!("Unknown log level: '{}'", s))),
+    }
+}
+
+/* fn<'de, D> serialize_log_level(D) -> Result<Level, D::Error>
+where D: Deserializer<'de>
+{
+
+} */
+//fn serialize_log_level() -> Level
