@@ -1,4 +1,4 @@
-FROM rust:alpine3.14 as builder
+FROM rust:alpine3.17 as builder
 
 # update packages
 RUN apk update

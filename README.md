@@ -1,4 +1,4 @@
-# Docker registry
+# Orca registry
 Orca is a pure-rust implementation of a Docker Registry.
 
 Note: Orca is still in early development ([status](#status)).
