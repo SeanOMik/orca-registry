@@ -11,3 +11,7 @@
 - [x] streaming layer bytes into providers
 - [x] streaming layer bytes from providers
 - [ ] better client error messages
+- [ ] fix repository list
+  - [ ] its not responding with anything
+  - [ ] make sure private repositories dont show up
+- [ ] fix pulling from public repositories when not logged in
