@@ -9,17 +9,24 @@ use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
 use crate::auth::access_denied_response;
+use crate::database::Database;
 use crate::dto::RepositoryVisibility;
 use crate::dto::user::{Permission, UserAuth};
 use crate::error::AppError;
 
-pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
+pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, auth: Option<UserAuth>) -> Result<Response, AppError> {
     // Check if the user has permission to pull, or that the repository is public
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-        return Ok(access_denied_response(&state.config));
+    if let Some(auth) = auth {
+        let mut auth_driver = state.auth_checker.lock().await;
+        if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
+            return Ok(access_denied_response(&state.config));
+        }
+    } else {
+        let database = &state.database;
+        if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
+            return Ok(access_denied_response(&state.config));
+        }
     }
-    drop(auth_driver);
 
     let storage = state.storage.lock().await;
 
@@ -38,13 +45,19 @@ pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String
     Ok(StatusCode::NOT_FOUND.into_response())
 }
 
-pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
+pub async fn pull_digest_get(Path((name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>, auth: Option<UserAuth>) -> Result<Response, AppError> {
     // Check if the user has permission to pull, or that the repository is public
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-        return Ok(access_denied_response(&state.config));
+    if let Some(auth) = auth {
+        let mut auth_driver = state.auth_checker.lock().await;
+        if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
+            return Ok(access_denied_response(&state.config));
+        }
+    } else {
+        let database = &state.database;
+        if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
+            return Ok(access_denied_response(&state.config));
+        }
     }
-    drop(auth_driver);
 
     let storage = state.storage.lock().await;
 

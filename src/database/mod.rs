@@ -410,9 +410,20 @@ impl Database for Pool<Sqlite> {
 
     async fn verify_user_login(&self, email: String, password: String) -> anyhow::Result<bool> {
         let email = email.to_lowercase();
-        let row: (String, ) = sqlx::query_as("SELECT password_hash FROM user_logins WHERE email = ?")
+
+        let row: (String,) = match sqlx::query_as("SELECT password_hash FROM user_logins WHERE email = ?")
             .bind(email)
-            .fetch_one(self).await?;
+            .fetch_one(self).await {
+            Ok(row) => row,
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    return Ok(false)
+                },
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
 
         Ok(bcrypt::verify(password, &row.0)?)
     }

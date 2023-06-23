@@ -16,7 +16,7 @@ use crate::dto::manifest::Manifest;
 use crate::dto::user::{UserAuth, Permission};
 use crate::error::AppError;
 
-pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>, body: String) -> Result<Response, AppError> {
+pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth, body: String) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
         return Ok(access_denied_response(&state.config));
@@ -64,13 +64,19 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     }
 }
 
-pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
+pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: Option<UserAuth>) -> Result<Response, AppError> {
     // Check if the user has permission to pull, or that the repository is public
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-        return Ok(access_denied_response(&state.config));
+    if let Some(auth) = auth {
+        let mut auth_driver = state.auth_checker.lock().await;
+        if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
+            return Ok(access_denied_response(&state.config));
+        }
+    } else {
+        let database = &state.database;
+        if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
+            return Ok(access_denied_response(&state.config));
+        }
     }
-    drop(auth_driver);
     
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
@@ -107,13 +113,20 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
     ).into_response())
 }
 
-pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
+pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: Option<UserAuth>) -> Result<Response, AppError> {
     // Check if the user has permission to pull, or that the repository is public
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-        return Ok(access_denied_response(&state.config));
+    if let Some(auth) = auth {
+        let mut auth_driver = state.auth_checker.lock().await;
+        if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
+            return Ok(access_denied_response(&state.config));
+        }
+        drop(auth_driver);
+    } else {
+        let database = &state.database;
+        if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
+            return Ok(access_denied_response(&state.config));
+        }
     }
-    drop(auth_driver);
     
     // Get the digest from the reference path.
     let database = &state.database;
@@ -148,7 +161,7 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
     ).into_response())
 }
 
-pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, Extension(auth): Extension<UserAuth>) -> Result<Response, AppError> {
+pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth) -> Result<Response, AppError> {
     let mut auth_driver = state.auth_checker.lock().await;
     if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
         return Ok(access_denied_response(&state.config));

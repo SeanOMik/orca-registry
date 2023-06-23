@@ -1,7 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
+use axum::{http::{StatusCode, header, HeaderName, HeaderMap, Request, request::Parts}, extract::{FromRequest, FromRequestParts}};
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
+use tracing::debug;
+
+use crate::{app_state::AppState, database::Database};
 
 use super::RepositoryVisibility;
 
@@ -68,6 +73,51 @@ impl UserAuth {
         Self {
             user,
             token,
+        }
+    }
+}
+
+#[async_trait]
+impl FromRequestParts<Arc<AppState>> for UserAuth {
+    type Rejection = (StatusCode, HeaderMap);
+
+    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {
+        let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
+        let mut failure_headers = HeaderMap::new();
+        failure_headers.append(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
+        failure_headers.append(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
+
+        let auth = String::from(
+            parts.headers
+                .get(header::AUTHORIZATION)
+                .ok_or((StatusCode::UNAUTHORIZED, failure_headers.clone()))?
+                .to_str()
+                .map_err(|_| (StatusCode::UNAUTHORIZED, failure_headers.clone()))?
+        );
+
+        let token = match auth.split_once(' ') {
+            Some((auth, token)) if auth == "Bearer" => token,
+            // This line would allow empty tokens
+            //_ if auth == "Bearer" => Ok(AuthToken(None)),
+            _ => return Err( (StatusCode::UNAUTHORIZED, failure_headers) ),
+        };
+
+        // If the token is not valid, return an unauthorized response
+        let database = &state.database;
+        if let Ok(Some(user)) = database.verify_user_token(token.to_string()).await {
+            debug!("Authenticated user through middleware: {}", user.user.username);
+
+            Ok(user)
+        } else {
+            let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
+            let mut headers = HeaderMap::new();
+            headers.insert(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
+            headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string().parse().unwrap());
+
+            Err((
+                StatusCode::UNAUTHORIZED,
+                headers
+            ))
         }
     }
 }

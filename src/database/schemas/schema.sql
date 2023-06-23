@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS user_tokens (
     created_at BIGINT NOT NULL
 );
 
--- create admin user
+-- create admin user (password is 'admin')
 INSERT OR IGNORE INTO users (username, email, login_source) VALUES ('admin', 'admin@example.com', 0);
-INSERT OR IGNORE INTO user_logins (email, password_hash, password_salt) VALUES ('admin@example.com', '$2y$05$ZBnzGzctboHkUDMr4W02jOaUuPwmRC2OgWKKBxqiQsYv53OkUrfO6', 'x5ECk0jUmOSfBWxW52wsyO');
+INSERT OR IGNORE INTO user_logins (email, password_hash, password_salt) VALUES ('admin@example.com', '$2y$05$v9ND7dQKvfkOtY4XpnKVaOpvV0F5RDnW1Ec.nfkZ0vmEjLX5D5S8e', 'x5ECk0jUmOSfBWxW52wsyO');
 INSERT OR IGNORE INTO user_registry_permissions (email, user_type) VALUES ('admin@example.com', 1);

@@ -102,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
-    let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
+    //let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 
     let app = Router::new()
@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
                 .put(api::manifests::upload_manifest_put)
                 .head(api::manifests::manifest_exists_head)
                 .delete(api::manifests::delete_manifest))
-            .layer(auth_middleware) // require auth for ALL v2 routes
+            //.layer(auth_middleware) // require auth for ALL v2 routes
         )
         .with_state(state)
         .layer(TraceLayer::new_for_http());

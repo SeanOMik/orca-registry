@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use axum::Extension;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use axum::http::{StatusCode, HeaderName};
@@ -18,7 +17,7 @@ use crate::dto::user::UserAuth;
 
 /// https://docs.docker.com/registry/spec/api/#api-version-check
 /// full endpoint: `/v2/`
-pub async fn version_check(Extension(_auth): Extension<UserAuth>, _state: State<Arc<AppState>>) -> Response {
+pub async fn version_check(_state: State<Arc<AppState>>) -> Response {
     (
         StatusCode::OK,
         [( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0" )]

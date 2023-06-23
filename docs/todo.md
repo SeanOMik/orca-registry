@@ -14,4 +14,4 @@
 - [ ] fix repository list
   - [ ] its not responding with anything
   - [ ] make sure private repositories dont show up
-- [ ] fix pulling from public repositories when not logged in
+- [x] fix pulling from public repositories when not logged in
