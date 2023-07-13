@@ -9,6 +9,7 @@ mod auth;
 mod error;
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -18,7 +19,11 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Router, routing};
 use axum::ServiceExt;
+use axum_server::tls_rustls::RustlsConfig;
+use lazy_static::lazy_static;
+use regex::Regex;
 use sqlx::ConnectOptions;
+use tokio::fs::File;
 use tower_layer::Layer;
 
 use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
@@ -36,11 +41,14 @@ use crate::config::{Config, DatabaseConfig, StorageConfig};
 
 use tower_http::trace::TraceLayer;
 
+lazy_static! {
+    static ref REGISTRY_URL_REGEX: Regex = regex::Regex::new(r"/v2/([\w\-_./]+)/(blobs|tags|manifests)").unwrap();
+}
+
 /// Encode the 'name' path parameter in the url
 async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
     // Attempt to find the name using regex in the url
-    let regex = regex::Regex::new(r"/v2/([\w/]+)/(blobs|tags|manifests)")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let regex = &REGISTRY_URL_REGEX;
     let captures = match regex.captures(request.uri().path()) {
         Some(captures) => captures,
         None => return Ok(next.run(request).await),
@@ -72,6 +80,11 @@ async fn main() -> anyhow::Result<()> {
     let sqlite_config = match &config.database {
         DatabaseConfig::Sqlite(sqlite) => sqlite,
     };
+
+    // Create a database file if it doesn't exist already
+    if !Path::new(&sqlite_config.path).exists() {
+        File::create(&sqlite_config.path).await?;
+    }
     
     let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
         .journal_mode(SqliteJournalMode::Wal);
@@ -100,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
 
+    let tls_config = config.tls.clone();
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
     //let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
@@ -136,10 +150,23 @@ async fn main() -> anyhow::Result<()> {
 
     let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
 
-    info!("Starting http server, listening on {}", app_addr);
-    axum::Server::bind(&app_addr)
-        .serve(layered_app.into_make_service())
-        .await?;
+    match tls_config {
+        Some(tls) if tls.enable => {
+            info!("Starting https server, listening on {}", app_addr);
+        
+            let config = RustlsConfig::from_pem_file(&tls.cert, &tls.key).await?;
+
+            axum_server::bind_rustls(app_addr, config)
+                .serve(layered_app.into_make_service())
+                .await?;
+        },
+        _ => {
+            info!("Starting http server, listening on {}", app_addr);
+            axum::Server::bind(&app_addr)
+                .serve(layered_app.into_make_service())
+                .await?;
+        }
+    }
 
     Ok(())
 }

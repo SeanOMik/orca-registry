@@ -32,7 +32,8 @@ sha256 = "1.1.2"
 pin-project-lite = "0.2.9"
 anyhow = "1.0.70"
 async-stream = "0.3.5"
-axum = "0.6.16"
+axum = "0.6.18"
+axum-server = { version = "0.5.1", features = [ "tls-rustls" ] }
 axum-macros = "0.3.7"
 
 tower-http = { version = "0.4.0", features = [ "trace", "normalize-path" ] }
@@ -52,3 +53,4 @@ rand = "0.8.5"
 bcrypt = "0.14.0"
 bitflags = "2.2.1"
 ldap3 = "0.11.1"
+lazy_static = "1.4.0"

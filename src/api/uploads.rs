@@ -12,13 +12,21 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
-use crate::auth::access_denied_response;
+use crate::auth::{access_denied_response, unauthenticated_response};
 use crate::byte_stream::ByteStream;
+use crate::dto::scope::{Scope, ScopeType, Action};
 use crate::dto::user::{UserAuth, Permission};
 use crate::error::AppError;
 
 /// Starting an upload
-pub async fn start_upload_post(Path((name, )): Path<(String, )>, auth: UserAuth, state: State<Arc<AppState>>) -> Result<Response, AppError> {
+pub async fn start_upload_post(Path((name, )): Path<(String, )>, auth: Option<UserAuth>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
+    if auth.is_none() {
+        debug!("atuh was not given, responding with scope");
+        let s = Scope::new(ScopeType::Repository, name, &[Action::Push, Action::Pull]);
+        return Ok(unauthenticated_response(&state.config, &s));
+    }
+    let auth = auth.unwrap();
+
     let mut auth_driver = state.auth_checker.lock().await;
     if auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
         debug!("Upload requested");

@@ -5,6 +5,7 @@
   - [ ] simple way to define users and their permissions through a "users.toml"
   - [x] Only allow users to create repositories if its the same name as their username, or if they're an admin
   - [x] Only allow users to pull from their own repositories
+- [ ] token expiry
 - [ ] postgresql
 - [ ] prometheus metrics
 - [ ] simple webui for managing the registry
@@ -15,3 +16,5 @@
   - [ ] its not responding with anything
   - [ ] make sure private repositories dont show up
 - [x] fix pulling from public repositories when not logged in
+- [ ] database table for orca related info (version, etc.)
+  - [ ] only execute sql schemas if this table is missing or not updated

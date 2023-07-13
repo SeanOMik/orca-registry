@@ -19,7 +19,7 @@ impl fmt::Display for ScopeType {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub enum Action {
     #[default]
     None,
@@ -42,6 +42,16 @@ pub struct Scope {
     scope_type: ScopeType,
     path: String,
     actions: Vec<Action>,
+}
+
+impl Scope {
+    pub fn new(scope_type: ScopeType, path: String, actions: &[Action]) -> Self {
+        Self {
+            scope_type,
+            path,
+            actions: actions.to_vec(),
+        }
+    }
 }
 
 impl fmt::Display for Scope {

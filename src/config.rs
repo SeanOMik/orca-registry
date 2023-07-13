@@ -48,6 +48,13 @@ pub struct SqliteDbConfig {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct TlsConfig {
+    pub enable: bool,
+    pub key: String,
+    pub cert: String,
+}
+
+#[derive(Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatabaseConfig {
     Sqlite(SqliteDbConfig),
@@ -63,6 +70,7 @@ pub struct Config {
     pub ldap: Option<LdapConnectionConfig>,
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
+    pub tls: Option<TlsConfig>,
 }
 
 #[allow(dead_code)]

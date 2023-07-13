@@ -7,7 +7,7 @@ use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Req
 use sqlx::{Pool, Sqlite};
 use tracing::debug;
 
-use crate::{app_state::AppState, dto::{user::{Permission, RegistryUserType}, RepositoryVisibility}, config::Config};
+use crate::{app_state::AppState, dto::{user::{Permission, RegistryUserType}, RepositoryVisibility, scope::{self, Scope}}, config::Config};
 use crate::database::Database;
 
 use async_trait::async_trait;
@@ -133,14 +133,17 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
 /// Creates a response with an Unauthorized (401) status code.
 /// The www-authenticate header is set to notify the client of where to authorize with.
 #[inline(always)]
-pub fn unauthenticated_response(config: &Config) -> Response {
-    let bearer = format!("Bearer realm=\"{}/auth\"", config.url());
+pub fn unauthenticated_response(config: &Config, scope: &Scope) -> Response {
+    let bearer = format!("Bearer realm=\"{}/auth\",service=\"{}\",scope=\"{}\"", config.url(), "localhost:3000", scope);
+    debug!("responding with www-authenticate header of: \"{}\"", bearer);
     (
         StatusCode::UNAUTHORIZED,
         [
             ( header::WWW_AUTHENTICATE, bearer ),
+            ( header::CONTENT_TYPE, "application/json".to_string() ),
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
-        ]
+        ],
+        "{\"errors\":[{\"code\":\"UNAUTHORIZED\",\"message\":\"access to the requested resource is not authorized\",\"detail\":[{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"pull\"},{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"push\"}]}]}"
     ).into_response()
 }
 

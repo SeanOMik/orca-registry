@@ -8,9 +8,10 @@ use axum::response::{IntoResponse, Response};
 use tokio_util::io::ReaderStream;
 
 use crate::app_state::AppState;
-use crate::auth::access_denied_response;
+use crate::auth::{access_denied_response, unauthenticated_response};
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
+use crate::dto::scope::{Scope, ScopeType, Action};
 use crate::dto::user::{Permission, UserAuth};
 use crate::error::AppError;
 
@@ -24,7 +25,8 @@ pub async fn digest_exists_head(Path((name, layer_digest)): Path<(String, String
     } else {
         let database = &state.database;
         if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
-            return Ok(access_denied_response(&state.config));
+            let s = Scope::new(ScopeType::Repository, name, &[Action::Push, Action::Pull]);
+            return Ok(unauthenticated_response(&state.config, &s));
         }
     }
 

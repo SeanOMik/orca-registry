@@ -179,7 +179,8 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
             debug!("Authentication failed, incorrect password!");
             
-            return Ok(unauthenticated_response(&state.config));
+            // TODO: Dont unwrap, find a way to return multiple scopes
+            return Ok(unauthenticated_response(&state.config, auth.scope.first().unwrap()));
         }
         drop(auth_driver);
 
