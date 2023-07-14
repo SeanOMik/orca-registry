@@ -1,3 +1,10 @@
+CREATE TABLE IF NOT EXISTS orca (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    orca_version TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    jwt_secret TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL UNIQUE PRIMARY KEY,
     -- 0 = private, 1 = public

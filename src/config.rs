@@ -71,6 +71,8 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
     pub tls: Option<TlsConfig>,
+    #[serde(skip)]
+    pub jwt_key: String,
 }
 
 #[allow(dead_code)]

@@ -59,9 +59,8 @@ pub struct AuthResponse {
     issued_at: String,
 }
 
-/// In the returned UserToken::user, only the username is specified
-fn create_jwt_token(account: Option<&str>, scopes: Vec<Scope>) -> anyhow::Result<TokenInfo> {
-    let key: Hmac<Sha256> = Hmac::new_from_slice(b"some-secret")?;
+fn create_jwt_token(jwt_key: String, account: Option<&str>, scopes: Vec<Scope>) -> anyhow::Result<TokenInfo> {
+    let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_key.as_bytes())?;
 
     let now = chrono::offset::Utc::now();
 
@@ -186,11 +185,12 @@ pub async fn auth_basic_get(
                 scope.actions.retain(|a| *a == Action::Pull);
             }
 
-            let token = create_jwt_token(None, auth.scope).map_err(|_| {
-                error!("Failed to create jwt token!");
+            let token = create_jwt_token(state.config.jwt_key.clone(), None, auth.scope)
+                .map_err(|_| {
+                    error!("Failed to create jwt token!");
 
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
 
             let token_str = token.token;
             let now_format = format!("{}", token.created_at.format("%+"));
@@ -290,11 +290,12 @@ pub async fn auth_basic_get(
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token = create_jwt_token(Some(account), vec![]).map_err(|_| {
-            error!("Failed to create jwt token!");
+        let token = create_jwt_token(state.config.jwt_key.clone(), Some(account), vec![])
+            .map_err(|_| {
+                error!("Failed to create jwt token!");
 
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
         let token_str = token.token;
 
         debug!("Created jwt token");

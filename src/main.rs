@@ -69,7 +69,7 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resu
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = Config::new()
+    let mut config = Config::new()
         .expect("Failure to parse config!");
 
     tracing_subscriber::fmt()
@@ -91,6 +91,9 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(15)
         .connect_with(connection_options).await?;
     pool.create_schema().await?;
+
+    // set jwt key
+    config.jwt_key = pool.get_jwt_secret().await?;
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = match &config.storage {
         StorageConfig::Filesystem(fs) => {

@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use sqlx::{Sqlite, Pool};
+use hmac::{Hmac, digest::KeyInit};
+use rand::{Rng, distributions::Alphanumeric};
+use sha2::Sha256;
+use sqlx::{Sqlite, Pool, sqlite::SqliteError};
 use tracing::{debug, warn};
 
 use chrono::{DateTime, Utc, NaiveDateTime, TimeZone};
@@ -8,11 +11,12 @@ use crate::dto::{Tag, user::{User, RepositoryPermissions, RegistryUserType, Perm
 
 #[async_trait]
 pub trait Database {
-
     // Digest related functions
 
     /// Create the tables in the database
     async fn create_schema(&self) -> anyhow::Result<()>;
+
+    async fn get_jwt_secret(&self) -> anyhow::Result<String>;
 
     // Tag related functions
 
@@ -67,12 +71,54 @@ pub trait Database {
 #[async_trait]
 impl Database for Pool<Sqlite> {
     async fn create_schema(&self) -> anyhow::Result<()> {
-        sqlx::query(include_str!("schemas/schema.sql"))
-            .execute(self).await?;
+        let orca_version = "0.1.0";
+        let schema_version = "0.0.1";
 
-        debug!("Created database schema");
+        let row: Option<(u32, )> = match sqlx::query_as("SELECT COUNT(1) FROM orca WHERE \"schema_version\" = ?")
+                .bind(schema_version)
+                .fetch_one(self).await {
+            Ok(row) => Some(row),
+            Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    None
+                },
+                // ignore no such table errors
+                sqlx::Error::Database(b) if b.message().starts_with("no such table") => None,
+                _ => {
+                    return Err(anyhow::Error::new(e));
+                }
+            }
+        };
+
+        if row.is_none() || row.unwrap().0 == 0 {
+            let jwt_sec: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(16)
+                .map(char::from)
+                .collect();
+
+            // create schema
+            // TODO: Check if needed
+            sqlx::query(include_str!("schemas/schema.sql"))
+                .execute(self).await?;
+            debug!("Created database schema");
+
+            sqlx::query("INSERT INTO orca(orca_version, schema_version, jwt_secret) VALUES (?, ?, ?)")
+                .bind(orca_version)
+                .bind(schema_version)
+                .bind(jwt_sec)
+                .execute(self).await?;
+            debug!("Inserted information about orca!");
+        }
 
         Ok(())
+    }
+
+    async fn get_jwt_secret(&self) -> anyhow::Result<String> {
+        let rows: (String, ) = sqlx::query_as("SELECT jwt_secret FROM orca WHERE id = (SELECT max(id) FROM orca)")
+            .fetch_one(self).await?;
+
+        Ok(rows.0)
     }
 
     async fn link_manifest_layer(&self, manifest_digest: &str, layer_digest: &str) -> anyhow::Result<()> {
