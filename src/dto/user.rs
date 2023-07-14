@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use axum::{http::{StatusCode, header, HeaderName, HeaderMap, Request, request::Parts}, extract::{FromRequest, FromRequestParts}};
+use axum::{http::{StatusCode, header, HeaderName, HeaderMap, request::Parts}, extract::FromRequestParts};
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::{app_state::AppState, database::Database};
 
@@ -92,16 +92,9 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
         let auth = String::from(
             parts.headers
                 .get(header::AUTHORIZATION)
-                .ok_or(
-                    {
-                        debug!("Client did not send authorization header");
-                        (StatusCode::UNAUTHORIZED, failure_headers.clone())
-                    })?
+                .ok_or((StatusCode::UNAUTHORIZED, failure_headers.clone()))?
                 .to_str()
-                .map_err(|_| {
-                    warn!("Failure to convert Authorization header to string!");
-                    (StatusCode::UNAUTHORIZED, failure_headers.clone())
-                })?
+                .map_err(|_| (StatusCode::UNAUTHORIZED, failure_headers.clone()))?
         );
 
         debug!("got auth header");
@@ -118,7 +111,7 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
         // If the token is not valid, return an unauthorized response
         let database = &state.database;
         if let Ok(Some(user)) = database.verify_user_token(token.to_string()).await {
-            debug!("Authenticated user through middleware: {}", user.user.username);
+            debug!("Authenticated user through request extractor: {}", user.user.username);
 
             Ok(user)
         } else {
@@ -135,6 +128,7 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct Permission: u32 {
+        const NONE = 0b0000;
         const PULL = 0b0001;
         const PUSH = 0b0010;
         const EDIT = 0b0111;

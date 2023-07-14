@@ -22,14 +22,13 @@ use axum::ServiceExt;
 use axum_server::tls_rustls::RustlsConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
-use sqlx::ConnectOptions;
 use tokio::fs::File;
 use tower_layer::Layer;
 
 use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
-use tracing::{debug, Level, info};
+use tracing::{debug, info};
 
 use app_state::AppState;
 use database::Database;
@@ -117,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
     //let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
+    let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::check_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 
     let app = Router::new()
@@ -143,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
                 .put(api::manifests::upload_manifest_put)
                 .head(api::manifests::manifest_exists_head)
                 .delete(api::manifests::delete_manifest))
-            //.layer(auth_middleware) // require auth for ALL v2 routes
+            .layer(auth_middleware) // require auth for ALL v2 routes
         )
         .with_state(state)
         .layer(TraceLayer::new_for_http());

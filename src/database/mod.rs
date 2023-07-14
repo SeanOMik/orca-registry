@@ -550,7 +550,7 @@ impl Database for Pool<Sqlite> {
 
         let (expiry, created_at) = (Utc.timestamp_millis_opt(expiry).single(), Utc.timestamp_millis_opt(created_at).single());
         if let (Some(expiry), Some(created_at)) = (expiry, created_at) {
-            let user = User::new(email, user_row.0, LoginSource::try_from(user_row.1)?);
+            let user = User::new(user_row.0, email, LoginSource::try_from(user_row.1)?);
             let token = TokenInfo::new(token, expiry, created_at);
             let auth = UserAuth::new(user, token);
 

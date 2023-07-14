@@ -3,7 +3,7 @@ use serde::{Deserialize, de::Visitor};
 
 use std::fmt;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub enum ScopeType {
     #[default]
     Unknown,
@@ -37,7 +37,7 @@ impl fmt::Display for Action {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Scope {
     scope_type: ScopeType,
     path: String,

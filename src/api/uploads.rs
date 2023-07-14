@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::Arc;
 
-use axum::Extension;
 use axum::http::{StatusCode, header, HeaderName};
 use axum::extract::{Path, BodyStream, State, Query};
 use axum::response::{IntoResponse, Response};
@@ -12,47 +11,26 @@ use futures::StreamExt;
 use tracing::{debug, warn};
 
 use crate::app_state::AppState;
-use crate::auth::{access_denied_response, unauthenticated_response};
 use crate::byte_stream::ByteStream;
-use crate::dto::scope::{Scope, ScopeType, Action};
-use crate::dto::user::{UserAuth, Permission};
 use crate::error::AppError;
 
 /// Starting an upload
-pub async fn start_upload_post(Path((name, )): Path<(String, )>, auth: Option<UserAuth>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
-    if auth.is_none() {
-        debug!("atuh was not given, responding with scope");
-        let s = Scope::new(ScopeType::Repository, name, &[Action::Push, Action::Pull]);
-        return Ok(unauthenticated_response(&state.config, &s));
-    }
-    let auth = auth.unwrap();
+pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> Result<Response, AppError> {
+    debug!("Upload requested");
+    let uuid = uuid::Uuid::new_v4();
 
-    let mut auth_driver = state.auth_checker.lock().await;
-    if auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        debug!("Upload requested");
-        let uuid = uuid::Uuid::new_v4();
+    debug!("Requesting upload of image {}, generated uuid: {}", name, uuid);
 
-        debug!("Requesting upload of image {}, generated uuid: {}", name, uuid);
+    let location = format!("/v2/{}/blobs/uploads/{}", name, uuid.to_string());
+    debug!("Constructed upload url: {}", location);
 
-        let location = format!("/v2/{}/blobs/uploads/{}", name, uuid.to_string());
-        debug!("Constructed upload url: {}", location);
-
-        return Ok((
-            StatusCode::ACCEPTED,
-            [ (header::LOCATION, location) ]
-        ).into_response());
-    }
-
-    Ok(access_denied_response(&state.config))
+    return Ok((
+        StatusCode::ACCEPTED,
+        [ (header::LOCATION, location) ]
+    ).into_response());
 }
 
-pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, auth: UserAuth, state: State<Arc<AppState>>, mut body: BodyStream) -> Result<Response, AppError> {
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(access_denied_response(&state.config));
-    }
-    drop(auth_driver);
-
+pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, mut body: BodyStream) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await?;
 
@@ -105,13 +83,7 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
     ).into_response())
 }
 
-pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, auth: UserAuth, state: State<Arc<AppState>>, body: Bytes) -> Result<Response, AppError> {
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(access_denied_response(&state.config));
-    }
-    drop(auth_driver);
-    
+pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>, state: State<Arc<AppState>>, body: Bytes) -> Result<Response, AppError> {
     let digest = query.get("digest").unwrap();
 
     let storage = state.storage.lock().await;
@@ -134,13 +106,7 @@ pub async fn finish_chunked_upload_put(Path((name, layer_uuid)): Path<(String, S
     ).into_response())
 }
 
-pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth) -> Result<Response, AppError> {
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(access_denied_response(&state.config));
-    }
-    drop(auth_driver);
-    
+pub async fn cancel_upload_delete(Path((_name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
     storage.delete_digest(&layer_uuid).await?;
     
@@ -148,13 +114,7 @@ pub async fn cancel_upload_delete(Path((name, layer_uuid)): Path<(String, String
     Ok(StatusCode::OK.into_response())
 }
 
-pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth) -> Result<Response, AppError> {
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(access_denied_response(&state.config));
-    }
-    drop(auth_driver);
-    
+pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
     let ending = storage.digest_length(&layer_uuid).await?.unwrap_or(0);
 

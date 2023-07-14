@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use axum::Extension;
 use axum::extract::{Path, State};
 use axum::response::{Response, IntoResponse};
 use axum::http::{StatusCode, HeaderName, header};
@@ -17,12 +16,6 @@ use crate::dto::user::{UserAuth, Permission};
 use crate::error::AppError;
 
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth, body: String) -> Result<Response, AppError> {
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(access_denied_response(&state.config));
-    }
-    drop(auth_driver);
-
     // Calculate the sha256 digest for the manifest.
     let calculated_hash = sha256::digest(body.clone());
     let calculated_digest = format!("sha256:{}", calculated_hash);

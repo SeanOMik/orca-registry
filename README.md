@@ -24,17 +24,20 @@ $ htpasswd -nB
 ```
 
 3. Insert the new user's email, password hash into the `user_logins` table. The salt is not used, so you can put whatever there
+> WARNING: Ensure that the username is all lowercase!!!
 ```sql
 INSERT INTO user_logins (email, password_hash, password_salt) VALUES ("example@email.com", "some password", "random salt")
 ```
 
 4. Insert the new user into another table, `users` so the registry knows the source of the user
+> WARNING: Ensure that the username is all lowercase!!!
 ```sql
 INSERT INTO users (username, email, login_source) VALUES ("example", "example@email.com", 0)
 ```
 a `login_source` of `0` means database
 
-5. Give the user registry permissions
+1. Give the user registry permissions
+> WARNING: Ensure that the username is all lowercase!!!
 ```sql
 INSERT INTO user_registry_permissions (email, user_type) VALUES ("example@email.com", 1)
 ```

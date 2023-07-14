@@ -2,12 +2,11 @@ pub mod ldap_driver;
 
 use std::{ops::Deref, sync::Arc};
 
-use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Request}, middleware::Next, response::{Response, IntoResponse}};
+use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Request, Method}, middleware::Next, response::{Response, IntoResponse}};
 
-use sqlx::{Pool, Sqlite};
-use tracing::debug;
+use tracing::{debug, warn, error};
 
-use crate::{app_state::AppState, dto::{user::{Permission, RegistryUserType}, RepositoryVisibility, scope::{self, Scope}}, config::Config};
+use crate::{app_state::AppState, dto::{user::{Permission, RegistryUserType, UserAuth}, RepositoryVisibility, scope::{Scope, ScopeType, Action}}, config::Config};
 use crate::database::Database;
 
 use async_trait::async_trait;
@@ -31,23 +30,29 @@ where
     T: Database + Send + Sync
 {
     async fn user_has_permission(&mut self, email: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool> {
-        let allowed_to: bool = {
-            if self.get_repository_owner(&repository).await?
-                .map_or(false, |owner| owner == email) {
-            
-                debug!("Allowing request, user is owner of repository");
-                true
-            } else {
+        match self.get_repository_owner(&repository).await? {
+            Some(owner) if owner == email => return Ok(true),
+            Some(_other_owner) => {
                 match self.get_user_registry_type(email.clone()).await? {
-                    Some(RegistryUserType::Admin) => true,
+                    Some(RegistryUserType::Admin) => return Ok(true),
                     _ => {
-                        check_user_permissions(self, email, repository, permission, required_visibility).await?
+                        return Ok(check_user_permissions(self, email, repository, permission, required_visibility).await?);
                     }
                 }
-            }
-        };
-    
-        Ok(allowed_to)
+            },
+            None => {
+                // If the repository does not exist, see if its the per-user repositories and autocreate it.
+                if let Some(user) = self.get_user(email.clone()).await? {
+                    let username = user.username.to_lowercase();
+                    if repository.starts_with(&username) {
+                        self.save_repository(&repository, RepositoryVisibility::Private, Some(email), None).await?;
+                        return Ok(true);
+                    }
+                }
+            },
+        }
+
+        Ok(false)
     }
 
     async fn verify_user_login(&mut self, email: String, password: String) -> anyhow::Result<bool> {
@@ -133,9 +138,13 @@ pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Re
 /// Creates a response with an Unauthorized (401) status code.
 /// The www-authenticate header is set to notify the client of where to authorize with.
 #[inline(always)]
-pub fn unauthenticated_response(config: &Config, scope: &Scope) -> Response {
-    let bearer = format!("Bearer realm=\"{}/auth\",service=\"{}\",scope=\"{}\"", config.url(), "localhost:3000", scope);
+pub fn auth_challenge_response(config: &Config, scope: Option<Scope>) -> Response {
+    let bearer = match scope {
+        Some(scope) => format!("Bearer realm=\"{}/auth\",scope=\"{}\"", config.url(), scope),
+        None => format!("Bearer realm=\"{}/auth\"", config.url())
+    };
     debug!("responding with www-authenticate header of: \"{}\"", bearer);
+
     (
         StatusCode::UNAUTHORIZED,
         [
@@ -143,18 +152,83 @@ pub fn unauthenticated_response(config: &Config, scope: &Scope) -> Response {
             ( header::CONTENT_TYPE, "application/json".to_string() ),
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
         ],
-        "{\"errors\":[{\"code\":\"UNAUTHORIZED\",\"message\":\"access to the requested resource is not authorized\",\"detail\":[{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"pull\"},{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"push\"}]}]}"
+        //"{\"errors\":[{\"code\":\"UNAUTHORIZED\",\"message\":\"access to the requested resource is not authorized\",\"detail\":[{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"pull\"},{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"push\"}]}]}"
     ).into_response()
 }
 
 /// Creates a response with a Forbidden (403) status code.
 /// No other headers are set.
 #[inline(always)]
-pub fn access_denied_response(config: &Config) -> Response {
+pub fn access_denied_response(_config: &Config) -> Response {
     (
         StatusCode::FORBIDDEN,
         [
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
         ]
     ).into_response()
+}
+
+pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<UserAuth>, request: Request<B>, next: Next<B>) -> Result<Response, Rejection> {
+    let config = &state.config;
+    // note: url is relative to /v2
+    let url = request.uri().to_string();
+
+    if url == "/" && auth.is_none() {
+        debug!("Responding to /v2/ with an auth challenge");
+        return Ok(auth_challenge_response(config, None));
+    }
+    
+    let url_split: Vec<&str> = url.split("/").skip(1).collect();
+    let target_name = url_split[0].replace("%2F", "/");
+    let target_type = url_split[1];
+
+    // check if the request is targeting something inside an image repository
+    if target_type == "blobs" || target_type == "uploads" || target_type == "manifests" {
+        let scope_actions: &[Action] = match request.method().clone() {
+            Method::GET | Method::HEAD => &[Action::Pull],
+            Method::POST | Method::PATCH | Method::PUT => &[Action::Pull, Action::Push],
+            _ => &[],
+        };
+        let scope = Scope::new(ScopeType::Repository, target_name.clone(), scope_actions);
+
+        // respond with an auth challenge if there is no auth header.
+        //if !headers.contains_key(header::AUTHORIZATION) && auth.is_none() {
+        if auth.is_none() {
+            debug!("User is not authenticated, sending challenge");
+            return Ok(auth_challenge_response(config, Some(scope)));
+        }
+        let auth = auth.unwrap();
+
+        let mut auth_checker = state.auth_checker.lock().await;
+
+        // Check permission for each action
+        for action in scope_actions {
+            // action to permission
+            let permission = match action {
+                Action::Pull => Permission::PULL,
+                Action::Push => Permission::PUSH,
+                _ => Permission::NONE,
+            };
+
+            // get optional required visibility from action
+            let vis = match action {
+                Action::Pull => Some(RepositoryVisibility::Public),
+                _ => None,
+            };
+
+            match auth_checker.user_has_permission(auth.user.email.clone(), target_name.clone(), permission, vis).await {
+                Ok(false) => return Ok(auth_challenge_response(config, Some(scope))),
+                Ok(true) => { },
+                Err(e) => {
+                    error!("Error when checking user permissions! {}", e);
+
+                    return Err((StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()));
+                },
+            }
+        }
+    } else {
+        warn!("Unhandled auth check for '{target_type}'!!"); // TODO
+    }
+
+    Ok(next.run(request).await)
 }

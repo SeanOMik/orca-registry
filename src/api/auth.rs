@@ -15,7 +15,7 @@ use rand::Rng;
 use crate::{dto::{scope::Scope, user::TokenInfo}, app_state::AppState};
 use crate::database::Database;
 
-use crate::auth::unauthenticated_response;
+use crate::auth::auth_challenge_response;
 
 #[derive(Deserialize, Debug)]
 pub struct TokenAuthRequest {
@@ -180,7 +180,7 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
             debug!("Authentication failed, incorrect password!");
             
             // TODO: Dont unwrap, find a way to return multiple scopes
-            return Ok(unauthenticated_response(&state.config, auth.scope.first().unwrap()));
+            return Ok(auth_challenge_response(&state.config, Some(auth.scope.first().unwrap().clone())));
         }
         drop(auth_driver);
 
