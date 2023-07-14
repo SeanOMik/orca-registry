@@ -4,11 +4,12 @@ use async_trait::async_trait;
 use axum::{http::{StatusCode, header, HeaderName, HeaderMap, request::Parts}, extract::FromRequestParts};
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::{app_state::AppState, database::Database};
 
-use super::RepositoryVisibility;
+use super::{RepositoryVisibility, scope::Scope};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoginSource {
@@ -41,6 +42,50 @@ impl User {
             username,
             email,
             source,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthToken {
+    #[serde(rename = "iss")]
+    pub issuer: String,
+
+    #[serde(rename = "sub")]
+    pub subject: String,
+
+    #[serde(rename = "aud")]
+    pub audience: String,
+
+    #[serde(rename = "exp")]
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub expiration: DateTime<Utc>,
+
+    #[serde(rename = "nbf")]
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub not_before: DateTime<Utc>,
+
+    #[serde(rename = "iat")]
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub issued_at: DateTime<Utc>,
+
+    #[serde(rename = "jti")]
+    pub jwt_id: String,
+
+    pub access: Vec<Scope>,
+}
+
+impl AuthToken {
+    pub fn new(issuer: String, subject: String, audience: String, expiration: DateTime<Utc>, not_before: DateTime<Utc>, issued_at: DateTime<Utc>, jwt_id: String, access: Vec<Scope>) -> Self {
+        Self {
+            issuer,
+            subject,
+            audience,
+            expiration,
+            not_before,
+            issued_at,
+            jwt_id,
+            access
         }
     }
 }

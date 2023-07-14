@@ -1,12 +1,13 @@
 use anyhow::anyhow;
-use serde::{Deserialize, de::Visitor};
+use serde::{Deserialize, de::Visitor, Serialize};
 
 use std::fmt;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ScopeType {
     #[default]
     Unknown,
+    #[serde(rename = "repository")]
     Repository,
 }
 
@@ -19,11 +20,13 @@ impl fmt::Display for ScopeType {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Action {
     #[default]
     None,
+    #[serde(rename = "push")]
     Push,
+    #[serde(rename = "pull")]
     Pull,
 }
 
@@ -37,11 +40,11 @@ impl fmt::Display for Action {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Scope {
-    scope_type: ScopeType,
-    path: String,
-    actions: Vec<Action>,
+    pub scope_type: ScopeType,
+    pub path: String,
+    pub actions: Vec<Action>,
 }
 
 impl Scope {

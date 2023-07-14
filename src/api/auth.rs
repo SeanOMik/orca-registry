@@ -1,8 +1,17 @@
-use std::{sync::Arc, collections::{HashMap, BTreeMap}, time::SystemTime};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::SystemTime,
+};
 
-use axum::{extract::{Query, State}, response::{IntoResponse, Response}, http::{StatusCode, header}, Form};
+use axum::{
+    extract::{Query, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+    Form,
+};
 use axum_auth::AuthBasic;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Days, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, span, Level};
 
@@ -12,8 +21,15 @@ use sha2::Sha256;
 
 use rand::Rng;
 
-use crate::{dto::{scope::Scope, user::TokenInfo}, app_state::AppState};
-use crate::database::Database;
+use crate::{database::Database, dto::scope::Action};
+use crate::{
+    app_state::AppState,
+    dto::{
+        scope::{Scope, ScopeType},
+        user::{AuthToken, TokenInfo},
+        RepositoryVisibility,
+    },
+};
 
 use crate::auth::auth_challenge_response;
 
@@ -44,38 +60,43 @@ pub struct AuthResponse {
 }
 
 /// In the returned UserToken::user, only the username is specified
-fn create_jwt_token(account: &str) -> anyhow::Result<TokenInfo> {
+fn create_jwt_token(account: Option<&str>, scopes: Vec<Scope>) -> anyhow::Result<TokenInfo> {
     let key: Hmac<Sha256> = Hmac::new_from_slice(b"some-secret")?;
-    
+
     let now = chrono::offset::Utc::now();
-    let now_secs = now.timestamp();
 
-    // Construct the claims for the token
-    let mut claims = BTreeMap::new();
-    claims.insert("issuer", "orca-registry__DEV");
-    claims.insert("subject", &account);
-    //claims.insert("audience", auth.service);
+    // Expire the token in a day
+    let expiration = now.checked_add_days(Days::new(1)).unwrap();
 
-    let not_before = format!("{}", now_secs);
-    let issued_at = format!("{}", now_secs);
-    let expiration = format!("{}", now_secs + 86400); // 1 day
-    claims.insert("notbefore", &not_before);
-    claims.insert("issuedat", &issued_at);
-    claims.insert("expiration", &expiration); // TODO: 20 seconds expiry for testing
-
-    let issued_at = now;
-    let expiration = now + Duration::seconds(20);
-
-    // Create a randomized jwtid
     let mut rng = rand::thread_rng();
     let jwtid = format!("{}", rng.gen::<u64>());
-    claims.insert("jwtid", &jwtid);
 
-    let token_str = claims.sign_with_key(&key)?;
-    Ok(TokenInfo::new(token_str, expiration, issued_at))
+    // empty account if they are not authenticated
+    let account = account.map(|a| a.to_string()).unwrap_or(String::new());
+
+    // Construct the claims for the token
+    // TODO: Verify the token!
+    let token = AuthToken::new(
+        String::from("orca-registry__DEV"),
+        account,
+        String::from("reg"),
+        expiration,
+        now.clone(),
+        now.clone(),
+        jwtid,
+        scopes,
+    );
+
+    let token_str = token.sign_with_key(&key)?;
+    Ok(TokenInfo::new(token_str, expiration, now))
 }
 
-pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppState>>, Query(params): Query<HashMap<String, String>>, form: Option<Form<AuthForm>>) -> Result<Response, StatusCode> {
+pub async fn auth_basic_get(
+    basic_auth: Option<AuthBasic>,
+    state: State<Arc<AppState>>,
+    Query(params): Query<HashMap<String, String>>,
+    form: Option<Form<AuthForm>>,
+) -> Result<Response, StatusCode> {
     let mut auth = TokenAuthRequest {
         user: None,
         password: None,
@@ -88,19 +109,32 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
     let auth_method;
 
+    // Process all the scopes
+    if let Some(scope) = params.get("scope") {
+        // TODO: Handle multiple scopes
+        match Scope::try_from(&scope[..]) {
+            Ok(scope) => {
+                auth.scope.push(scope);
+            }
+            Err(_) => {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
+    }
+
     // If BasicAuth is provided, set the fields to it
     if let Some(AuthBasic((username, pass))) = basic_auth {
         auth.user = Some(username.clone());
         auth.password = pass;
 
         // I hate having to create this span here multiple times, but its the only
-        // way I could think of 
+        // way I could think of
         /* let span = span!(Level::DEBUG, "auth", username = auth.user.clone());
         let _enter = span.enter();
         debug!("Read user authentication from an AuthBasic"); */
 
         auth_method = "basic-auth";
-    } 
+    }
     // Username and password could be passed in forms
     // If there was a way to also check if the Method was "POST", this is where
     // we would do it.
@@ -114,14 +148,88 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
 
         auth_method = "form";
     } else {
-        info!("Auth failure! Auth was not provided in either AuthBasic or Form!");
+        // If no auth parameters were specified, check if the repository is public. if it is, respond with a token.
 
-        // Maybe BAD_REQUEST should be returned?
-        return Err(StatusCode::UNAUTHORIZED);
+        let is_public_access = {
+            let mut res = vec![];
+
+            for scope in auth.scope.iter() {
+                match scope.scope_type {
+                    ScopeType::Repository => {
+                        // check repository visibility
+                        let database = &state.database;
+                        match database.get_repository_visibility(&scope.path).await {
+                            Ok(Some(RepositoryVisibility::Public)) => res.push(Ok(true)),
+                            Ok(_) => res.push(Ok(false)),
+                            Err(e) => {
+                                error!(
+                                    "Failure to check repository visibility for {}! Err: {}",
+                                    scope.path, e
+                                );
+
+                                res.push(Err(StatusCode::INTERNAL_SERVER_ERROR));
+                            }
+                        }
+                    }
+                    _ => res.push(Ok(false)),
+                }
+            }
+
+            // merge the booleans into a single bool, respond with errors if there are any.
+            let res: Result<Vec<bool>, StatusCode> = res.into_iter().collect();
+            res?.iter().all(|b| *b)
+        };
+
+        if is_public_access {
+            for scope in auth.scope.iter_mut() {
+                // only retain Action::Pull
+                scope.actions.retain(|a| *a == Action::Pull);
+            }
+
+            let token = create_jwt_token(None, auth.scope).map_err(|_| {
+                error!("Failed to create jwt token!");
+
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            let token_str = token.token;
+            let now_format = format!("{}", token.created_at.format("%+"));
+
+            let auth_response = AuthResponse {
+                token: token_str.clone(),
+                expires_in: 86400, // 1 day
+                issued_at: now_format,
+            };
+    
+            let json_str =
+                serde_json::to_string(&auth_response).map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+            debug!("Created anonymous token for public scopes!");
+
+            return Ok((
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "application/json"),
+                    (header::AUTHORIZATION, &format!("Bearer {}", token_str)),
+                ],
+                json_str,
+            )
+                .into_response());
+        } else {
+            info!("Auth failure! Auth was not provided in either AuthBasic or Form!");
+
+            // Maybe BAD_REQUEST should be returned?
+            return Err(StatusCode::UNAUTHORIZED);
+        }
     }
 
     // Create logging span for the rest of this request
-    let span = span!(Level::DEBUG, "auth", username = auth.user.clone(), auth_method);
+    let span = span!(
+        Level::DEBUG,
+        "auth",
+        username = auth.user.clone(),
+        auth_method
+    );
     let _enter = span.enter();
 
     debug!("Parsed user auth request");
@@ -131,8 +239,11 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
     if let Some(account) = params.get("account") {
         if let Some(user) = &auth.user {
             if account != user {
-                error!("`user` and `account` are not the same!!! (user: {}, account: {})", user, account);
-                
+                error!(
+                    "`user` and `account` are not the same!!! (user: {}, account: {})",
+                    user, account
+                );
+
                 return Err(StatusCode::BAD_REQUEST);
             }
         }
@@ -143,20 +254,6 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
     // Get service from query string
     if let Some(service) = params.get("service") {
         auth.service = Some(service.clone());
-    }
-
-    // Process all the scopes
-    if let Some(scope) = params.get("scope") {
-        
-        // TODO: Handle multiple scopes
-        match Scope::try_from(&scope[..]) {
-            Ok(scope) => {
-                auth.scope.push(scope);
-            },
-            Err(_) => {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
     }
 
     // Get offline token and attempt to convert it to a boolean
@@ -175,24 +272,29 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
     if let (Some(account), Some(password)) = (&auth.account, auth.password) {
         // Ensure that the password is correct
         let mut auth_driver = state.auth_checker.lock().await;
-        if !auth_driver.verify_user_login(account.clone(), password).await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        if !auth_driver
+            .verify_user_login(account.clone(), password)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        {
             debug!("Authentication failed, incorrect password!");
-            
+
             // TODO: Dont unwrap, find a way to return multiple scopes
-            return Ok(auth_challenge_response(&state.config, Some(auth.scope.first().unwrap().clone())));
+            return Ok(auth_challenge_response(
+                &state.config,
+                Some(auth.scope.first().unwrap().clone()),
+            ));
         }
         drop(auth_driver);
 
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token = create_jwt_token(account)
-            .map_err(|_| {
-                error!("Failed to create jwt token!");
+        let token = create_jwt_token(Some(account), vec![]).map_err(|_| {
+            error!("Failed to create jwt token!");
 
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         let token_str = token.token;
 
         debug!("Created jwt token");
@@ -208,11 +310,18 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
             issued_at: now_format,
         };
 
-        let json_str = serde_json::to_string(&auth_response)
-            .map_err(|_| StatusCode::BAD_REQUEST)?;
+        let json_str =
+            serde_json::to_string(&auth_response).map_err(|_| StatusCode::BAD_REQUEST)?;
 
         let database = &state.database;
-        database.store_user_token(token_str.clone(), account.clone(), token.expiry, token.created_at).await
+        database
+            .store_user_token(
+                token_str.clone(),
+                account.clone(),
+                token.expiry,
+                token.created_at,
+            )
+            .await
             .map_err(|_| {
                 error!("Failed to store user token in database!");
 
@@ -223,11 +332,12 @@ pub async fn auth_basic_get(basic_auth: Option<AuthBasic>, state: State<Arc<AppS
         return Ok((
             StatusCode::OK,
             [
-                ( header::CONTENT_TYPE, "application/json" ),
-                ( header::AUTHORIZATION, &format!("Bearer {}", token_str) )
+                (header::CONTENT_TYPE, "application/json"),
+                (header::AUTHORIZATION, &format!("Bearer {}", token_str)),
             ],
-            json_str
-        ).into_response());
+            json_str,
+        )
+            .into_response());
     }
 
     info!("Auth failure! Not enough information given to create auth token!");
