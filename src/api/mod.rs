@@ -17,7 +17,7 @@ pub mod auth;
 /// full endpoint: `/v2/`
 pub async fn version_check(_state: State<Arc<AppState>>) -> Response {
     (
-        StatusCode::UNAUTHORIZED,
+        StatusCode::OK,
         [
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0" ),
         ]

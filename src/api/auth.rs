@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     sync::Arc,
     time::SystemTime,
 };
@@ -11,7 +11,7 @@ use axum::{
     Form,
 };
 use axum_auth::AuthBasic;
-use chrono::{DateTime, Days, Duration, Utc};
+use chrono::{DateTime, Days, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, span, Level};
 
@@ -33,7 +33,7 @@ use crate::{
 
 use crate::auth::auth_challenge_response;
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug)]
 pub struct TokenAuthRequest {
     user: Option<String>,
     password: Option<String>,
@@ -157,13 +157,13 @@ pub async fn auth_basic_get(
                     ScopeType::Repository => {
                         // check repository visibility
                         let database = &state.database;
-                        match database.get_repository_visibility(&scope.path).await {
+                        match database.get_repository_visibility(&scope.name).await {
                             Ok(Some(RepositoryVisibility::Public)) => res.push(Ok(true)),
                             Ok(_) => res.push(Ok(false)),
                             Err(e) => {
                                 error!(
                                     "Failure to check repository visibility for {}! Err: {}",
-                                    scope.path, e
+                                    scope.name, e
                                 );
 
                                 res.push(Err(StatusCode::INTERNAL_SERVER_ERROR));
@@ -201,8 +201,8 @@ pub async fn auth_basic_get(
                 issued_at: now_format,
             };
     
-            let json_str =
-                serde_json::to_string(&auth_response).map_err(|_| StatusCode::BAD_REQUEST)?;
+            let json_str = serde_json::to_string(&auth_response)
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
     
             debug!("Created anonymous token for public scopes!");
 
@@ -213,8 +213,7 @@ pub async fn auth_basic_get(
                     (header::AUTHORIZATION, &format!("Bearer {}", token_str)),
                 ],
                 json_str,
-            )
-                .into_response());
+            ).into_response());
         } else {
             info!("Auth failure! Auth was not provided in either AuthBasic or Form!");
 
@@ -279,10 +278,15 @@ pub async fn auth_basic_get(
         {
             debug!("Authentication failed, incorrect password!");
 
+            // TODO: Multiple scopes
+            let scope = auth.scope
+                .first()
+                .and_then(|s| Some(s.clone()));
+
             // TODO: Dont unwrap, find a way to return multiple scopes
             return Ok(auth_challenge_response(
                 &state.config,
-                Some(auth.scope.first().unwrap().clone()),
+                scope,
             ));
         }
         drop(auth_driver);

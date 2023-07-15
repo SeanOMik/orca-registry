@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use axum::{http::{StatusCode, header, HeaderName, HeaderMap, request::Parts}, extract::FromRequestParts};
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
+use hmac::{Hmac, digest::KeyInit};
+use jwt::VerifyWithKey;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use tracing::debug;
 
 use crate::{app_state::AppState, database::Database};
@@ -109,12 +112,12 @@ impl TokenInfo {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserAuth {
-    pub user: User,
-    pub token: TokenInfo,
+    pub user: Option<User>,
+    pub token: AuthToken,
 }
 
 impl UserAuth {
-    pub fn new(user: User, token: TokenInfo) -> Self {
+    pub fn new(user: Option<User>, token: AuthToken) -> Self {
         Self {
             user,
             token,
@@ -132,8 +135,6 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
         failure_headers.append(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
         failure_headers.append(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
 
-        debug!("starting UserAuth request parts");
-
         let auth = String::from(
             parts.headers
                 .get(header::AUTHORIZATION)
@@ -142,8 +143,6 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
                 .map_err(|_| (StatusCode::UNAUTHORIZED, failure_headers.clone()))?
         );
 
-        debug!("got auth header");
-
         let token = match auth.split_once(' ') {
             Some((auth, token)) if auth == "Bearer" => token,
             // This line would allow empty tokens
@@ -151,22 +150,42 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
             _ => return Err( (StatusCode::UNAUTHORIZED, failure_headers) ),
         };
 
-        debug!("got token");
-
         // If the token is not valid, return an unauthorized response
-        let database = &state.database;
-        if let Ok(Some(user)) = database.verify_user_token(token.to_string()).await {
-            debug!("Authenticated user through request extractor: {}", user.user.username);
+        let jwt_key: Hmac<Sha256> = Hmac::new_from_slice(state.config.jwt_key.as_bytes())
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()) )?;
 
-            Ok(user)
-        } else {
-            debug!("Failure to verify user token, responding with auth realm");
+        match VerifyWithKey::<AuthToken>::verify_with_key(token, &jwt_key) {
+            Ok(token) => {
+                // attempt to get the user
+                if !token.subject.is_empty() {
+                    let database = &state.database;
+                    if let Ok(Some(user)) = database.get_user(token.subject.clone()).await {
+                        return Ok(UserAuth::new(Some(user), token));
+                    } else {
+                        debug!("failure to get user from token: {:?}", token);
+                    }
+                } else {
+                    return Ok(UserAuth::new(None, token));
+                }
 
-            Err((
-                StatusCode::UNAUTHORIZED,
-                failure_headers
-            ))
+                /* let database = &state.database;
+                if let Ok(user) = database.get_user(token.subject.clone()).await {
+                    return Ok(UserAuth::new(user, token));
+                } else {
+                    debug!("failure to get user from token: {:?}", token);
+                } */
+            },
+            Err(e) => {
+                debug!("Failure to verify user token: '{}'", e);
+            }
         }
+
+        debug!("Failure to verify user token, responding with auth realm");
+
+        Err((
+            StatusCode::UNAUTHORIZED,
+            failure_headers
+        ))
     }
 }
 

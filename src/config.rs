@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use figment::{Figment, providers::{Env, Toml, Format}};
 use figment_cliarg_provider::FigmentCliArgsProvider;
 use serde::{Deserialize, Deserializer};

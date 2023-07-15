@@ -3,7 +3,7 @@ use ldap3::{LdapConnAsync, Ldap, Scope, SearchEntry};
 use sqlx::{Pool, Sqlite};
 use tracing::{debug, warn};
 
-use crate::{config::LdapConnectionConfig, dto::{user::{Permission, LoginSource, RegistryUserType, self}, RepositoryVisibility}, database::Database};
+use crate::{config::LdapConnectionConfig, dto::{user::{Permission, LoginSource, RegistryUserType}, RepositoryVisibility}, database::Database};
 
 use super::AuthDriver;
 

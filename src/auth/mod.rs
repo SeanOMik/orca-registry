@@ -1,6 +1,6 @@
 pub mod ldap_driver;
 
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Request, Method}, middleware::Next, response::{Response, IntoResponse}};
 
@@ -82,58 +82,7 @@ where
     Ok(false)
 }
 
-#[derive(Clone)]
-pub struct AuthToken(pub String);
-
-impl Deref for AuthToken {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 type Rejection = (StatusCode, HeaderMap);
-
-pub async fn require_auth<B>(State(state): State<Arc<AppState>>, mut request: Request<B>, next: Next<B>) -> Result<Response, Rejection> {
-    let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
-    let mut failure_headers = HeaderMap::new();
-    failure_headers.append(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
-    failure_headers.append(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
-
-    let auth = String::from(
-        request.headers().get(header::AUTHORIZATION)
-        .ok_or((StatusCode::UNAUTHORIZED, failure_headers.clone()))?
-        .to_str()
-        .map_err(|_| (StatusCode::UNAUTHORIZED, failure_headers.clone()))?
-    );
-
-    let token = match auth.split_once(' ') {
-        Some((auth, token)) if auth == "Bearer" => token,
-        // This line would allow empty tokens
-        //_ if auth == "Bearer" => Ok(AuthToken(None)),
-        _ => return Err( (StatusCode::UNAUTHORIZED, failure_headers) ),
-    };
-
-    // If the token is not valid, return an unauthorized response
-    let database = &state.database;
-    if let Ok(Some(user)) = database.verify_user_token(token.to_string()).await {
-        debug!("Authenticated user through middleware: {}", user.user.username);
-
-        request.extensions_mut().insert(user);
-
-        Ok(next.run(request).await)
-    } else {
-        let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
-        Ok((
-            StatusCode::UNAUTHORIZED,
-            [
-                ( header::WWW_AUTHENTICATE, bearer ),
-                ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
-            ]
-        ).into_response())
-    }
-}
 
 /// Creates a response with an Unauthorized (401) status code.
 /// The www-authenticate header is set to notify the client of where to authorize with.
@@ -173,9 +122,17 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
     // note: url is relative to /v2
     let url = request.uri().to_string();
 
-    if url == "/" && auth.is_none() {
-        debug!("Responding to /v2/ with an auth challenge");
-        return Ok(auth_challenge_response(config, None));
+    if url == "/" {
+        // if auth is none, then the client needs to authenticate
+        if auth.is_none() {
+            debug!("Responding to /v2/ with an auth challenge");
+            return Ok(auth_challenge_response(config, None));
+        }
+
+        debug!("user is authed");
+
+        // the client is authenticating right now
+        return Ok(next.run(request).await);
     }
     
     let url_split: Vec<&str> = url.split("/").skip(1).collect();
@@ -216,14 +173,28 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
                 _ => None,
             };
 
-            match auth_checker.user_has_permission(auth.user.email.clone(), target_name.clone(), permission, vis).await {
-                Ok(false) => return Ok(auth_challenge_response(config, Some(scope))),
-                Ok(true) => { },
-                Err(e) => {
-                    error!("Error when checking user permissions! {}", e);
+            if let Some(user) = &auth.user {
+                match auth_checker.user_has_permission(user.email.clone(), target_name.clone(), permission, vis).await {
+                    Ok(false) => return Ok(auth_challenge_response(config, Some(scope))),
+                    Ok(true) => { },
+                    Err(e) => {
+                        error!("Error when checking user permissions! {}", e);
 
-                    return Err((StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()));
-                },
+                        return Err((StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()));
+                    },
+                }
+            } else {
+                // anonymous users can ONLY pull from public repos
+                if permission != Permission::PULL {
+                    return Ok(access_denied_response(config));
+                }
+
+                // ensure the repo is public
+                let database = &state.database;
+                if let Some(RepositoryVisibility::Private) = database.get_repository_visibility(&target_name).await
+                        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()))? {
+                    return Ok(access_denied_response(config));
+                }
             }
         }
     } else {

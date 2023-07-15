@@ -6,13 +6,12 @@ use axum::http::{StatusCode, HeaderName, header};
 use tracing::log::warn;
 use tracing::{debug, info};
 
-use crate::auth::access_denied_response;
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::RepositoryVisibility;
 use crate::dto::digest::Digest;
 use crate::dto::manifest::Manifest;
-use crate::dto::user::{UserAuth, Permission};
+use crate::dto::user::UserAuth;
 use crate::error::AppError;
 
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth, body: String) -> Result<Response, AppError> {
@@ -20,10 +19,13 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     let calculated_hash = sha256::digest(body.clone());
     let calculated_digest = format!("sha256:{}", calculated_hash);
 
+    // anonymous users wouldn't be able to get to this point, so it should be safe to unwrap.
+    let user = auth.user.unwrap();
+
     let database = &state.database;
 
     // Create the image repository and save the image manifest. This repository will be private by default
-    database.save_repository(&name, RepositoryVisibility::Private, Some(auth.user.email), None).await?;
+    database.save_repository(&name, RepositoryVisibility::Private, Some(user.email), None).await?;
     database.save_manifest(&name, &calculated_digest, &body).await?;
 
     // If the reference is not a digest, then it must be a tag name.
@@ -57,20 +59,7 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     }
 }
 
-pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: Option<UserAuth>) -> Result<Response, AppError> {
-    // Check if the user has permission to pull, or that the repository is public
-    if let Some(auth) = auth {
-        let mut auth_driver = state.auth_checker.lock().await;
-        if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-            return Ok(access_denied_response(&state.config));
-        }
-    } else {
-        let database = &state.database;
-        if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
-            return Ok(access_denied_response(&state.config));
-        }
-    }
-    
+pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
         true => reference.clone(),
@@ -106,21 +95,8 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
     ).into_response())
 }
 
-pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: Option<UserAuth>) -> Result<Response, AppError> {
-    // Check if the user has permission to pull, or that the repository is public
-    if let Some(auth) = auth {
-        let mut auth_driver = state.auth_checker.lock().await;
-        if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PULL, Some(RepositoryVisibility::Public)).await? {
-            return Ok(access_denied_response(&state.config));
-        }
-        drop(auth_driver);
-    } else {
-        let database = &state.database;
-        if database.get_repository_visibility(&name).await? != Some(RepositoryVisibility::Public) {
-            return Ok(access_denied_response(&state.config));
-        }
-    }
-    
+pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
+    debug!("start of head");
     // Get the digest from the reference path.
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
@@ -133,6 +109,7 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
             }
         }
     };
+    debug!("found digest: {}", digest);
 
     let manifest_content = database.get_manifest(&name, &digest).await?;
     if manifest_content.is_none() {
@@ -141,6 +118,8 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
     let manifest_content = manifest_content.unwrap();
+
+    debug!("got content");
 
     Ok((
         StatusCode::OK,
@@ -154,13 +133,7 @@ pub async fn manifest_exists_head(Path((name, reference)): Path<(String, String)
     ).into_response())
 }
 
-pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth) -> Result<Response, AppError> {
-    let mut auth_driver = state.auth_checker.lock().await;
-    if !auth_driver.user_has_permission(auth.user.username, name.clone(), Permission::PUSH, None).await? {
-        return Ok(access_denied_response(&state.config));
-    }
-    drop(auth_driver);
-
+pub async fn delete_manifest(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
         true => {

@@ -1,13 +1,11 @@
 use async_trait::async_trait;
-use hmac::{Hmac, digest::KeyInit};
 use rand::{Rng, distributions::Alphanumeric};
-use sha2::Sha256;
-use sqlx::{Sqlite, Pool, sqlite::SqliteError};
+use sqlx::{Sqlite, Pool};
 use tracing::{debug, warn};
 
-use chrono::{DateTime, Utc, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Utc, NaiveDateTime};
 
-use crate::dto::{Tag, user::{User, RepositoryPermissions, RegistryUserType, Permission, UserAuth, TokenInfo, LoginSource}, RepositoryVisibility};
+use crate::dto::{Tag, user::{User, RepositoryPermissions, RegistryUserType, Permission, UserAuth, LoginSource}, RepositoryVisibility};
 
 #[async_trait]
 pub trait Database {
@@ -65,6 +63,7 @@ pub trait Database {
     async fn get_user_repo_permissions(&self, email: String, repository: String) -> anyhow::Result<Option<RepositoryPermissions>>;
     async fn get_user_registry_usertype(&self, email: String) -> anyhow::Result<Option<RegistryUserType>>;
     async fn store_user_token(&self, token: String, email: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> anyhow::Result<()>;
+    #[deprecated = "Tokens are now verified using a secret"]
     async fn verify_user_token(&self, token: String) -> anyhow::Result<Option<UserAuth>>;
 }
 
@@ -90,6 +89,10 @@ impl Database for Pool<Sqlite> {
             }
         };
 
+        sqlx::query(include_str!("schemas/schema.sql"))
+            .execute(self).await?;
+        debug!("Created database schema");
+
         if row.is_none() || row.unwrap().0 == 0 {
             let jwt_sec: String = rand::thread_rng()
                 .sample_iter(&Alphanumeric)
@@ -99,9 +102,9 @@ impl Database for Pool<Sqlite> {
 
             // create schema
             // TODO: Check if needed
-            sqlx::query(include_str!("schemas/schema.sql"))
+            /* sqlx::query(include_str!("schemas/schema.sql"))
                 .execute(self).await?;
-            debug!("Created database schema");
+            debug!("Created database schema"); */
 
             sqlx::query("INSERT INTO orca(orca_version, schema_version, jwt_secret) VALUES (?, ?, ?)")
                 .bind(orca_version)
@@ -415,6 +418,7 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn get_user(&self, email: String) -> anyhow::Result<Option<User>> {
+        debug!("getting user");
         let email = email.to_lowercase();
         let row: (String, u32) = match sqlx::query_as("SELECT username, login_source FROM users WHERE email = ?")
             .bind(email.clone())
@@ -559,50 +563,7 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
     
-    async fn verify_user_token(&self, token: String) -> anyhow::Result<Option<UserAuth>> {
-        let token_row: (String, i64, i64,) = match sqlx::query_as("SELECT email, expiry, created_at FROM user_tokens WHERE token = ?")
-            .bind(token.clone())
-            .fetch_one(self).await {
-            Ok(row) => row,
-            Err(e) => match e {
-                sqlx::Error::RowNotFound => {
-                    return Ok(None)
-                },
-                _ => {
-                    return Err(anyhow::Error::new(e));
-                }
-            }
-        };
-
-        let (email, expiry, created_at) = (token_row.0, token_row.1, token_row.2);
-
-        let user_row: (String, u32) = match sqlx::query_as("SELECT username, login_source FROM users WHERE email = ?")
-            .bind(email.clone())
-            .fetch_one(self).await {
-            Ok(row) => row,
-            Err(e) => match e {
-                sqlx::Error::RowNotFound => {
-                    return Ok(None)
-                },
-                _ => {
-                    return Err(anyhow::Error::new(e));
-                }
-            }
-        };
-
-        /* let user_row: (String, u32) = sqlx::query_as("SELECT email, login_source FROM users WHERE email = ?")
-            .bind(email.clone())
-            .fetch_one(self).await?; */
-
-        let (expiry, created_at) = (Utc.timestamp_millis_opt(expiry).single(), Utc.timestamp_millis_opt(created_at).single());
-        if let (Some(expiry), Some(created_at)) = (expiry, created_at) {
-            let user = User::new(user_row.0, email, LoginSource::try_from(user_row.1)?);
-            let token = TokenInfo::new(token, expiry, created_at);
-            let auth = UserAuth::new(user, token);
-
-            Ok(Some(auth))
-        } else {
-            Ok(None)
-        }
+    async fn verify_user_token(&self, _token: String) -> anyhow::Result<Option<UserAuth>> {
+        panic!("ERR: Database::verify_user_token is deprecated!")
     }
 }
