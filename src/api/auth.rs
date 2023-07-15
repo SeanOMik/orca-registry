@@ -332,7 +332,6 @@ pub async fn auth_basic_get(
 
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
-        drop(database);
 
         return Ok((
             StatusCode::OK,

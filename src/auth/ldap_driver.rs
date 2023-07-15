@@ -100,7 +100,6 @@ impl AuthDriver for LdapAuthDriver {
                     };
 
                     database.create_user(email.clone(), display_name, LoginSource::LDAP).await?;
-                    drop(database);
 
                     // Set the user registry type
                     let user_type = match self.is_user_admin(email.clone()).await? {
