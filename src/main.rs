@@ -123,8 +123,8 @@ async fn main() -> anyhow::Result<()> {
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 
     let app = Router::new()
-        .route("/auth", routing::get(api::auth::auth_basic_get)
-            .post(api::auth::auth_basic_get))
+        .route("/token", routing::get(api::auth::auth_basic_get)
+            .post(api::auth::auth_basic_post))
         .nest("/v2", Router::new()
             .route("/", routing::get(api::version_check))
             .route("/_catalog", routing::get(api::catalog::list_repositories))

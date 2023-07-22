@@ -89,8 +89,8 @@ type Rejection = (StatusCode, HeaderMap);
 #[inline(always)]
 pub fn auth_challenge_response(config: &Config, scope: Option<Scope>) -> Response {
     let bearer = match scope {
-        Some(scope) => format!("Bearer realm=\"{}/auth\",scope=\"{}\"", config.url(), scope),
-        None => format!("Bearer realm=\"{}/auth\"", config.url())
+        Some(scope) => format!("Bearer realm=\"{}/token\",scope=\"{}\"", config.url(), scope),
+        None => format!("Bearer realm=\"{}/token\"", config.url())
     };
     debug!("responding with www-authenticate header of: \"{}\"", bearer);
 

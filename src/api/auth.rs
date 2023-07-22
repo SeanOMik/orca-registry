@@ -55,6 +55,7 @@ pub struct AuthForm {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct AuthResponse {
     token: String,
+    access_token: Option<String>,
     expires_in: u32,
     issued_at: String,
 }
@@ -88,6 +89,17 @@ fn create_jwt_token(jwt_key: String, account: Option<&str>, scopes: Vec<Scope>) 
 
     let token_str = token.sign_with_key(&key)?;
     Ok(TokenInfo::new(token_str, expiration, now))
+}
+
+pub async fn auth_basic_post() -> Result<Response, StatusCode> {
+    return Ok((
+        StatusCode::METHOD_NOT_ALLOWED,
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ALLOW, "Allow: GET, HEAD, OPTIONS"),
+        ],
+        "{\"detail\": \"Method \\\"POST\\\" not allowed.\"}"
+    ).into_response());
 }
 
 pub async fn auth_basic_get(
@@ -197,6 +209,7 @@ pub async fn auth_basic_get(
 
             let auth_response = AuthResponse {
                 token: token_str.clone(),
+                access_token: Some(token_str.clone()),
                 expires_in: 86400, // 1 day
                 issued_at: now_format,
             };
@@ -276,15 +289,15 @@ pub async fn auth_basic_get(
 
     debug!("Constructed auth request");
 
-    if auth.account.is_none() {
-        debug!("Account is none");
+    if auth.user.is_none() {
+        debug!("User is none");
     }
 
     if auth.password.is_none() {
         debug!("Password is none");
     }
 
-    if let (Some(account), Some(password)) = (&auth.user, auth.password) {
+    if let (Some(account), Some(password)) = (auth.user, auth.password) {
         // Ensure that the password is correct
         let mut auth_driver = state.auth_checker.lock().await;
         if !auth_driver
@@ -310,7 +323,7 @@ pub async fn auth_basic_get(
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token = create_jwt_token(state.config.jwt_key.clone(), Some(account), vec![])
+        let token = create_jwt_token(state.config.jwt_key.clone(), Some(&account), vec![])
             .map_err(|_| {
                 error!("Failed to create jwt token!");
 
@@ -327,7 +340,8 @@ pub async fn auth_basic_get(
         // Construct the auth response
         let auth_response = AuthResponse {
             token: token_str.clone(),
-            expires_in: 20,
+            access_token: Some(token_str.clone()),
+            expires_in: 86400, // 1 day
             issued_at: now_format,
         };
 

@@ -130,7 +130,7 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
     type Rejection = (StatusCode, HeaderMap);
 
     async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {
-        let bearer = format!("Bearer realm=\"{}/auth\"", state.config.url());
+        let bearer = format!("Bearer realm=\"{}/token\"", state.config.url());
         let mut failure_headers = HeaderMap::new();
         failure_headers.append(header::WWW_AUTHENTICATE, bearer.parse().unwrap());
         failure_headers.append(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
