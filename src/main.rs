@@ -28,12 +28,13 @@ use tower_layer::Layer;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
+use tracing::metadata::LevelFilter;
 use tracing::{debug, info};
 
 use app_state::AppState;
 use database::Database;
 use tracing_subscriber::filter;
-use tracing_subscriber::{filter::FilterFn, layer::{Layer as TracingLayer, SubscriberExt}, util::SubscriberInitExt,};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
@@ -81,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
             .with(tracing_subscriber::fmt::layer())
             .with(filter::Targets::new()
                 .with_target("orca_registry", config.log_level)
+                .with_default(LevelFilter::INFO)
             )
             .init();
     } else {

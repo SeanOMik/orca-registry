@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::body::StreamBody;
 use axum::extract::{State, Path};
-use axum::http::{StatusCode, header, HeaderName, HeaderMap, HeaderValue};
+use axum::http::{StatusCode, header, HeaderName, HeaderMap};
 use axum::response::{IntoResponse, Response};
 use tokio_util::io::ReaderStream;
 use tracing::debug;

@@ -1,5 +1,7 @@
 FROM rust:alpine3.17 as builder
 
+ARG RELEASE_BUILD=true
+
 # update packages
 RUN apk update
 RUN apk add build-base openssl-dev ca-certificates
@@ -17,13 +19,13 @@ WORKDIR /app/src
 
 # Build dependencies only. Separate these for caches
 RUN cargo install cargo-build-deps
-RUN cargo build-deps --release
+RUN sh -c "cargo build-deps ${RELEASE_BUILD:+ --release}"
 
 # Build the release executable.
-RUN cargo build --release
+RUN sh -c "cargo build ${RELEASE_BUILD:+ --release}"
 
 # Runner stage. I tried using distroless (gcr.io/distroless/static-debian11), but the image was only ~3MBs smaller than
-# alpine. I chose to use alpine since a user can easily be added to the image.
+# alpine. I chose to use alpine since it makes it easier to exec into the container to debug things.
 FROM alpine:3.17
 
 ARG UNAME=orca-registry
@@ -34,6 +36,7 @@ ARG GID=1000
 RUN adduser --disabled-password --gecos "" $UNAME -s -G $GID -u $UID
 COPY --from=builder --chown=$UID:$GID /app/src/target/release/orca-registry /app/orca-registry
 
+# Chown everything
 RUN mkdir /data && \
     chown -R $UID:$GID /data && \
     chown -R $UID:$GID /app
