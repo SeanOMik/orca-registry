@@ -20,7 +20,7 @@ These instructions are assuming the user is stored in the database, if you use L
 
 2. Create a bcrypt password hash for the new user:
 ```shell
-$ htpasswd -nB
+$ htpasswd -nB <username>
 ```
 
 3. Insert the new user's email, password hash into the `user_logins` table. The salt is not used, so you can put whatever there

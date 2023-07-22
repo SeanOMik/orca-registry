@@ -245,14 +245,20 @@ pub async fn auth_basic_get(
 
                 return Err(StatusCode::BAD_REQUEST);
             }
+        } else {
+            auth.user = Some(account.clone());
         }
 
         auth.account = Some(account.clone());
+    } else {
+        debug!("Account was not provided through params");
     }
 
     // Get service from query string
     if let Some(service) = params.get("service") {
         auth.service = Some(service.clone());
+    } else {
+        debug!("Service was not provided through params");
     }
 
     // Get offline token and attempt to convert it to a boolean
@@ -260,6 +266,8 @@ pub async fn auth_basic_get(
         if let Ok(b) = offline_token.parse::<bool>() {
             auth.offline_token = Some(b);
         }
+    } else {
+        debug!("Offline Token was not provided through params");
     }
 
     if let Some(client_id) = params.get("client_id") {
@@ -268,7 +276,15 @@ pub async fn auth_basic_get(
 
     debug!("Constructed auth request");
 
-    if let (Some(account), Some(password)) = (&auth.account, auth.password) {
+    if auth.account.is_none() {
+        debug!("Account is none");
+    }
+
+    if auth.password.is_none() {
+        debug!("Password is none");
+    }
+
+    if let (Some(account), Some(password)) = (&auth.user, auth.password) {
         // Ensure that the password is correct
         let mut auth_driver = state.auth_checker.lock().await;
         if !auth_driver
@@ -346,5 +362,5 @@ pub async fn auth_basic_get(
 
     info!("Auth failure! Not enough information given to create auth token!");
     // If we didn't get fields required to make a token, then the client did something bad
-    Err(StatusCode::UNAUTHORIZED)
+    Err(StatusCode::BAD_REQUEST)
 }
