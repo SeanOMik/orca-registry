@@ -17,7 +17,7 @@ pin_project! {
 #[allow(dead_code)]
 impl ByteStream {
     /// Create a new `ByteStream` by wrapping a `futures` stream.
-    pub fn new<S>(stream: S) -> ByteStream
+    pub fn new<S>(stream: S) -> Self
     where
         S: Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
     {
@@ -25,6 +25,13 @@ impl ByteStream {
             size_hint: None,
             inner: Box::pin(stream),
         }
+    }
+
+    /// Recreate the ByteStream, skipping `n` elements
+    pub fn skip_recreate(mut self, n: usize) -> Self {
+        self.inner = Box::pin(self.inner.skip(n));
+
+        self
     }
 
     pub(crate) fn size_hint(&self) -> Option<usize> {
