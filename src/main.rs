@@ -32,6 +32,8 @@ use tracing::{debug, info};
 
 use app_state::AppState;
 use database::Database;
+use tracing_subscriber::filter;
+use tracing_subscriber::{filter::FilterFn, layer::{Layer as TracingLayer, SubscriberExt}, util::SubscriberInitExt,};
 
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
@@ -72,9 +74,21 @@ async fn main() -> anyhow::Result<()> {
     let mut config = Config::new()
         .expect("Failure to parse config!");
 
-    tracing_subscriber::fmt()
-        .with_max_level(config.log_level)
-        .init();
+    // Create a tracing subscriber
+    if !config.extra_logging {
+        // only allow logs from the registry
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer())
+            .with(filter::Targets::new()
+                .with_target("orca_registry", config.log_level)
+            )
+            .init();
+    } else {
+        // allow all logs from any crates
+        tracing_subscriber::fmt()
+            .with_max_level(config.log_level)
+            .init();
+    }
 
     let sqlite_config = match &config.database {
         DatabaseConfig::Sqlite(sqlite) => sqlite,

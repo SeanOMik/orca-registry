@@ -56,6 +56,8 @@ pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>
             // convert the `Stream` into an `axum::body::HttpBody`
             let body = StreamBody::new(stream);
 
+            debug!("length of range request: {}", starting - ending);
+
             Ok((
                 StatusCode::OK,
                 [
@@ -70,6 +72,8 @@ pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>
             let stream = ReaderStream::new(stream.into_async_read());
             // convert the `Stream` into an `axum::body::HttpBody`
             let body = StreamBody::new(stream);
+
+            debug!("length of streamed request: {}", len);
 
             Ok((
                 StatusCode::OK,

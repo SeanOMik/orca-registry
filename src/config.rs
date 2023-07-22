@@ -64,6 +64,8 @@ pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
+    #[serde(default)]
+    pub extra_logging: bool,
     #[serde(deserialize_with = "serialize_log_level", default = "default_log_level")]
     pub log_level: Level,
     pub ldap: Option<LdapConnectionConfig>,
