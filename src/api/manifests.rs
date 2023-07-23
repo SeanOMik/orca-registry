@@ -82,6 +82,8 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
     }
     let manifest_content = manifest_content.unwrap();
 
+    debug!("Pulled manifest: {}", manifest_content);
+
     Ok((
         StatusCode::OK,
         [

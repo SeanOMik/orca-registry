@@ -19,10 +19,10 @@ WORKDIR /app/src
 
 # Build dependencies only. Separate these for caches
 RUN cargo install cargo-build-deps
-RUN sh -c "cargo build-deps --release"
+RUN sh -c "cargo build-deps"
 
 # Build the release executable.
-RUN sh -c "cargo build --release"
+RUN sh -c "cargo build"
 
 # Runner stage. I tried using distroless (gcr.io/distroless/static-debian11), but the image was only ~3MBs smaller than
 # alpine. I chose to use alpine since it makes it easier to exec into the container to debug things.
@@ -34,7 +34,7 @@ ARG GID=1000
 
 # Add user and copy the executable from the build stage.
 RUN adduser --disabled-password --gecos "" $UNAME -s -G $GID -u $UID
-COPY --from=builder --chown=$UID:$GID /app/src/target/release/orca-registry /app/orca-registry
+COPY --from=builder --chown=$UID:$GID /app/src/target/debug/orca-registry /app/orca-registry
 
 # Chown everything
 RUN mkdir /data && \

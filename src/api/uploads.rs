@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::Arc;
 
-use axum::http::{StatusCode, header, HeaderName};
+use axum::http::{StatusCode, header, HeaderName, HeaderMap};
 use axum::extract::{Path, BodyStream, State, Query};
 use axum::response::{IntoResponse, Response};
 
@@ -30,7 +30,7 @@ pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> Result<Respo
     ).into_response());
 }
 
-pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>, mut body: BodyStream) -> Result<Response, AppError> {
+pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, headers: HeaderMap, state: State<Arc<AppState>>, mut body: BodyStream) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await?;
 
@@ -65,18 +65,30 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
         }
     };
 
-    let (starting, ending) = if let Some(current_size) = current_size {
-        (current_size, current_size + written_size)
+    let ending = if let Some(current_size) = current_size {
+        current_size + written_size
     } else {
-        (0, written_size)
+        written_size
     };
+
+    if let Some(content_length) = headers.get(header::CONTENT_LENGTH) {
+        let content_length = content_length.to_str().map(|cl| cl.parse::<usize>());
+
+        if let Ok(Ok(content_length)) = content_length {
+            debug!("Client specified a content length of {}", content_length);
+
+            if content_length != written_size {
+                warn!("The content length that was received from the client did not match the amount written to disk!");
+            }
+        }
+    }
 
     let full_uri = format!("{}/v2/{}/blobs/uploads/{}", state.config.url(), name, layer_uuid);
     Ok((
         StatusCode::ACCEPTED,
         [
             (header::LOCATION, full_uri),
-            (header::RANGE, format!("{}-{}", starting, ending)),
+            (header::RANGE, format!("0-{}", ending - 1)),
             (header::CONTENT_LENGTH, "0".to_string()),
             (HeaderName::from_static("docker-upload-uuid"), layer_uuid)
         ]
@@ -122,7 +134,8 @@ pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, Str
         StatusCode::CREATED,
         [
             (header::LOCATION, format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)),
-            (header::RANGE, format!("0-{}", ending)),
+            (header::RANGE, format!("0-{}", ending - 1)),
+            (header::CONTENT_LENGTH, "0".to_string()),
             (HeaderName::from_static("docker-upload-digest"), layer_uuid)
         ]
     ).into_response())

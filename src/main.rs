@@ -75,11 +75,34 @@ async fn main() -> anyhow::Result<()> {
     let mut config = Config::new()
         .expect("Failure to parse config!");
 
+    let mut logging_guards = Vec::new();
+
     // Create a tracing subscriber
     if !config.extra_logging {
+        let sqlite_config = match &config.database {
+            DatabaseConfig::Sqlite(sqlite) => sqlite,
+        };
+
+        let path = Path::new(&sqlite_config.path);
+        let path = path.parent().unwrap();
+
+        // create file writer
+        let file_appender = tracing_appender::rolling::never(path, "orca.log");
+        
+        //let (syslog_nb, _syslog_guard) = tracing_appender::non_blocking(syslog);
+        let (file_appender_nb, _file_guard) = tracing_appender::non_blocking(file_appender);
+        let (stdout_nb, _stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+
+        logging_guards.push(_file_guard);
+        logging_guards.push(_stdout_guard);
+
         // only allow logs from the registry
         tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_subscriber::fmt::layer()
+                .with_writer(file_appender_nb)
+                .with_writer(stdout_nb)
+                //.json()
+            )
             .with(filter::Targets::new()
                 .with_target("orca_registry", config.log_level)
                 .with_default(LevelFilter::INFO)
@@ -138,6 +161,8 @@ async fn main() -> anyhow::Result<()> {
     let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::check_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
 
+    //let debug_middleware = axum::middleware::from_fn(extreme_debug_middleware);
+    
     let app = Router::new()
         .route("/token", routing::get(api::auth::auth_basic_get)
             .post(api::auth::auth_basic_post))
@@ -165,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
             .layer(auth_middleware) // require auth for ALL v2 routes
         )
         .with_state(state)
+        //.layer(debug_middleware)
         .layer(TraceLayer::new_for_http());
 
     let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
