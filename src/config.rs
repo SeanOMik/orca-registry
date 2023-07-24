@@ -101,7 +101,6 @@ pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
-    pub registry_path: String,
     #[serde(default)]
     pub extra_logging: bool,
     pub log: LogConfig,

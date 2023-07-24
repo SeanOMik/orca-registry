@@ -1,7 +1,5 @@
 FROM rust:alpine3.17 as builder
 
-ARG RELEASE_BUILD=true
-
 # update packages
 RUN apk update
 RUN apk add build-base openssl-dev ca-certificates

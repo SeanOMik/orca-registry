@@ -1,17 +1,31 @@
 listen_address = "127.0.0.1"
 listen_port = "3000"
 url = "http://localhost:3000/"
+# the below paths are relative to this
+registry_path = "/app"
 
 # error, warn, info, debug, trace
-log_level = "debug"
+[log]
+level = "debug"
+path = "logs"
+format = "human"
+roll_period = "never"
+# minimizes logs from other crates (sqlx, hyper, etc.)
+extra_logging = false
+#env_filter = 
 
 [storage]
 driver = "filesystem"
-path = "/app/blobs"
+path = "blobs"
 
 [database]
 type = "sqlite"
-path = "/app/orca.db"
+path = "test.db"
+
+[tls]
+enable = false
+key = "key.pem"
+cert = "cert.pem"
 
 #[ldap]
 #connection_url = "ldap://localhost:389"

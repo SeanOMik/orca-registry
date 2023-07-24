@@ -8,7 +8,7 @@ mod config;
 mod auth;
 mod error;
 
-use std::fs;
+use std::{fs, io};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -71,14 +71,16 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resu
     Ok(next.run(request).await)
 }
 
-fn path_relative_to(registry_path: &str, other_path: &str) -> PathBuf {
-    let other = PathBuf::from(other_path);
+fn create_path_to(path: &str) -> io::Result<()> {
+    let path = PathBuf::from(path);
 
-    if other.is_absolute() {
-        other
-    } else {
-        PathBuf::from(registry_path).join(other)
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)?;
+        }
     }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -86,20 +88,13 @@ async fn main() -> anyhow::Result<()> {
     let mut config = Config::new()
         .expect("Failure to parse config!");
 
-    // Create registry directory if it doesn't exist
-    if !Path::new(&config.registry_path).exists() {
-        fs::create_dir_all(&config.registry_path)?;
-    }
-
     let mut logging_guards = Vec::new();
     {
         let logc = &config.log;
 
         // Create log directory if it doesn't exist
-        let log_path = path_relative_to(&config.registry_path, &logc.path);
-        if !log_path.exists() {
-            fs::create_dir_all(&log_path)?;
-        }
+        let log_path = &logc.path;
+        create_path_to(&log_path)?;
 
         // Get a rolling file appender depending on the config
         let file_appender = match logc.roll_period {
@@ -176,13 +171,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Create a database file if it doesn't exist already
-    let sqlite_path = path_relative_to(&config.registry_path, &sqlite_config.path);
-    debug!("sqlite path: {:?}", sqlite_path);
-    if !Path::new(&sqlite_path).exists() {
+    if !Path::new(&sqlite_config.path).exists() {
+        fs::create_dir_all(&sqlite_config.path)?;
         File::create(&sqlite_config.path).await?;
     }
     
-    let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", sqlite_path.as_os_str().to_str().unwrap()))?
+    let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
         .journal_mode(SqliteJournalMode::Wal);
     let pool = SqlitePoolOptions::new()
         .max_connections(15)
@@ -213,7 +207,6 @@ async fn main() -> anyhow::Result<()> {
     let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
 
     let tls_config = config.tls.clone();
-    let registry_path = config.registry_path.clone();
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
     let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::check_auth);
@@ -254,9 +247,7 @@ async fn main() -> anyhow::Result<()> {
         Some(tls) if tls.enable => {
             info!("Starting https server, listening on {}", app_addr);
         
-            let cert_path = path_relative_to(&registry_path, &tls.cert);
-            let key_path = path_relative_to(&registry_path, &tls.key);
-            let config = RustlsConfig::from_pem_file(&cert_path, &key_path).await?;
+            let config = RustlsConfig::from_pem_file(&tls.cert, &tls.key).await?;
 
             axum_server::bind_rustls(app_addr, config)
                 .serve(layered_app.into_make_service())
