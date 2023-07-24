@@ -142,13 +142,14 @@ async fn main() -> anyhow::Result<()> {
         };
 
         // Change filter to only log orca_registry or everything
-        let targets_filter = if logc.extra_logging {
-            filter::Targets::new()
-                .with_default(logc.level)
+        let targets_filter = if logc.env_filter.is_some() {
+            None
         } else {
-            filter::Targets::new()
-                .with_target("orca_registry", logc.level)
-                .with_default(LevelFilter::INFO)
+            Some(
+                filter::Targets::new()
+                    .with_target("orca_registry", logc.level)
+                    .with_default(LevelFilter::INFO)
+            )
         };
 
         // Get env filter if specified

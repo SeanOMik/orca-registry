@@ -92,7 +92,6 @@ pub struct LogConfig {
     #[serde(default)]
     pub roll_period: RollPeriod,
     #[serde(default)]
-    pub extra_logging: bool,
     pub env_filter: Option<String>,
 }
 
@@ -101,8 +100,6 @@ pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
-    #[serde(default)]
-    pub extra_logging: bool,
     pub log: LogConfig,
     pub ldap: Option<LdapConnectionConfig>,
     pub database: DatabaseConfig,

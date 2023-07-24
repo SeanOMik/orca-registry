@@ -1,42 +1,51 @@
 listen_address = "127.0.0.1"
 listen_port = "3000"
+## The full path of the registry
 url = "http://localhost:3000/"
-# the below paths are relative to this
-registry_path = "/app"
 
-# error, warn, info, debug, trace
 [log]
-level = "debug"
-path = "logs"
+## The minimum level of logs (ignored if 'env_filter' is specified)
+level = "info"
+## The directory that log files are stored in
+path = "/app/logs"
+## The format that logs are printed as, either 'human' (text), or 'json'
 format = "human"
+## The period that log files are rotated at
+## Possible values: minutely, hourly, daily, never
 roll_period = "never"
-# minimizes logs from other crates (sqlx, hyper, etc.)
-extra_logging = false
-#env_filter = 
+## https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html
+## Note: When set, 'level' is ignored
+# env_filter = "orca_registry=debug"
 
 [storage]
+## The storage driver, currently only filesystem is implemented
 driver = "filesystem"
-path = "blobs"
+## The directory that blobs will be stored at
+path = "/app/blobs"
 
 [database]
+## The type of database
 type = "sqlite"
-path = "test.db"
+## Path that the sqlite3 database file will be stored at
+path = "/app/orca.db"
 
-[tls]
-enable = false
-key = "key.pem"
-cert = "cert.pem"
+# [tls]
+# enable = true
+## Path of the tls key file
+# key = "/app/key.pem"
+## Path of the tls certificate file
+# cert = "/app/cert.pem"
 
-#[ldap]
-#connection_url = "ldap://localhost:389"
-#bind_dn = "cn=admin,dc=planetexpress,dc=com"
-#bind_password = "GoodNewsEveryone"
-#user_base_dn = "ou=people,dc=planetexpress,dc=com"
-#group_base_dn = "ou=people,dc=planetexpress,dc=com"
+# [ldap]
+# connection_url = "ldap://localhost:389"
+# bind_dn = "cn=admin,dc=planetexpress,dc=com"
+# bind_password = "GoodNewsEveryone"
+# user_base_dn = "ou=people,dc=planetexpress,dc=com"
+# group_base_dn = "ou=people,dc=planetexpress,dc=com"
 #
-#user_search_filter = "(&(objectClass=person)(mail=%s))"
-#group_search_filter = "(&(objectclass=groupOfNames)(member=%d))"
+# user_search_filter = "(&(objectClass=person)(mail=%s))"
+# group_search_filter = "(&(objectclass=groupOfNames)(member=%d))"
 #
-#admin_filter = "(memberOf=cn=admin_staff,ou=people,dc=planetexpress,dc=com)"
-#login_attribute = "mail"
-#display_name_attribute = "displayName"
+# admin_filter = "(memberOf=cn=admin_staff,ou=people,dc=planetexpress,dc=com)"
+# login_attribute = "mail"
+# display_name_attribute = "displayName"
