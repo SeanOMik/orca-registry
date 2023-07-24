@@ -59,15 +59,52 @@ pub enum DatabaseConfig {
     Sqlite(SqliteDbConfig),
 }
 
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LogFormat {
+    Human,
+    #[default]
+    Json,
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RollPeriod {
+    Minutely,
+    Hourly,
+    #[default]
+    Daily,
+    Never,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct LogConfig {
+    /// The minimum level of logging
+    #[serde(deserialize_with = "serialize_log_level", default = "default_log_level")]
+    pub level: Level,
+    /// The path of the logging file
+    #[serde(default = "default_log_path")]
+    pub path: String,
+    /// The format of the produced logs
+    #[serde(default)]
+    pub format: LogFormat,
+    /// The roll period of the file
+    #[serde(default)]
+    pub roll_period: RollPeriod,
+    #[serde(default)]
+    pub extra_logging: bool,
+    pub env_filter: Option<String>,
+}
+
 #[derive(Deserialize, Clone)]
 pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
+    pub registry_path: String,
     #[serde(default)]
     pub extra_logging: bool,
-    #[serde(deserialize_with = "serialize_log_level", default = "default_log_level")]
-    pub log_level: Level,
+    pub log: LogConfig,
     pub ldap: Option<LdapConnectionConfig>,
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
@@ -121,6 +158,10 @@ impl Config {
 
 fn default_log_level() -> Level {
     Level::INFO
+}
+
+fn default_log_path() -> String {
+    "orca.log".to_string()
 }
 
 fn serialize_log_level<'de, D>(deserializer: D) -> Result<Level, D::Error>

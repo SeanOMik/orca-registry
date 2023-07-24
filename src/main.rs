@@ -8,8 +8,9 @@ mod config;
 mod auth;
 mod error;
 
+use std::fs;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ use tracing::{debug, info};
 
 use app_state::AppState;
 use database::Database;
-use tracing_subscriber::filter;
+use tracing_subscriber::{filter, EnvFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::storage::StorageDriver;
@@ -70,48 +71,103 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resu
     Ok(next.run(request).await)
 }
 
+fn path_relative_to(registry_path: &str, other_path: &str) -> PathBuf {
+    let other = PathBuf::from(other_path);
+
+    if other.is_absolute() {
+        other
+    } else {
+        PathBuf::from(registry_path).join(other)
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut config = Config::new()
         .expect("Failure to parse config!");
 
-    let mut logging_guards = Vec::new();
+    // Create registry directory if it doesn't exist
+    if !Path::new(&config.registry_path).exists() {
+        fs::create_dir_all(&config.registry_path)?;
+    }
 
-    // Create a tracing subscriber
-    if !config.extra_logging {
-        let sqlite_config = match &config.database {
-            DatabaseConfig::Sqlite(sqlite) => sqlite,
+    let mut logging_guards = Vec::new();
+    {
+        let logc = &config.log;
+
+        // Create log directory if it doesn't exist
+        let log_path = path_relative_to(&config.registry_path, &logc.path);
+        if !log_path.exists() {
+            fs::create_dir_all(&log_path)?;
+        }
+
+        // Get a rolling file appender depending on the config
+        let file_appender = match logc.roll_period {
+            config::RollPeriod::Minutely => tracing_appender::rolling::minutely(log_path, "orca.log"),
+            config::RollPeriod::Hourly => tracing_appender::rolling::hourly(log_path, "orca.log"),
+            config::RollPeriod::Daily => tracing_appender::rolling::daily(log_path, "orca.log"),
+            config::RollPeriod::Never => tracing_appender::rolling::never(log_path, "orca.log"),
         };
 
-        let path = Path::new(&sqlite_config.path);
-        let path = path.parent().unwrap();
-
-        // create file writer
-        let file_appender = tracing_appender::rolling::never(path, "orca.log");
-        
-        //let (syslog_nb, _syslog_guard) = tracing_appender::non_blocking(syslog);
+        // Create non blocking loggers
         let (file_appender_nb, _file_guard) = tracing_appender::non_blocking(file_appender);
         let (stdout_nb, _stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
-
         logging_guards.push(_file_guard);
         logging_guards.push(_stdout_guard);
 
-        // only allow logs from the registry
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer()
-                .with_writer(file_appender_nb)
-                .with_writer(stdout_nb)
-                //.json()
+        // TODO: Is there a way for this to be less ugly?
+        // Get json or text layers
+        let (json_a, json_b, plain_a, plain_b) = match logc.format {
+            config::LogFormat::Json => (
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(file_appender_nb)
+                        .json()
+                ),
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(stdout_nb)
+                        .json()
+                ),
+                None,
+                None
+            ),
+            config::LogFormat::Human => (
+                None,
+                None,
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(file_appender_nb)
+                ),
+                Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(stdout_nb)
+                )
             )
-            .with(filter::Targets::new()
-                .with_target("orca_registry", config.log_level)
+        };
+
+        // Change filter to only log orca_registry or everything
+        let targets_filter = if logc.extra_logging {
+            filter::Targets::new()
+                .with_default(logc.level)
+        } else {
+            filter::Targets::new()
+                .with_target("orca_registry", logc.level)
                 .with_default(LevelFilter::INFO)
-            )
-            .init();
-    } else {
-        // allow all logs from any crates
-        tracing_subscriber::fmt()
-            .with_max_level(config.log_level)
+        };
+
+        // Get env filter if specified
+        let env_filter = if let Some(env_filter) = &logc.env_filter {
+            Some(EnvFilter::from_str(env_filter).unwrap())
+        } else { None };
+
+        tracing_subscriber::registry()
+            .with(json_a)
+            .with(json_b)
+            .with(plain_a)
+            .with(plain_b)
+            .with(targets_filter)
+            .with(env_filter)
             .init();
     }
 
@@ -120,11 +176,13 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Create a database file if it doesn't exist already
-    if !Path::new(&sqlite_config.path).exists() {
+    let sqlite_path = path_relative_to(&config.registry_path, &sqlite_config.path);
+    debug!("sqlite path: {:?}", sqlite_path);
+    if !Path::new(&sqlite_path).exists() {
         File::create(&sqlite_config.path).await?;
     }
     
-    let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
+    let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", sqlite_path.as_os_str().to_str().unwrap()))?
         .journal_mode(SqliteJournalMode::Wal);
     let pool = SqlitePoolOptions::new()
         .max_connections(15)
@@ -155,13 +213,11 @@ async fn main() -> anyhow::Result<()> {
     let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
 
     let tls_config = config.tls.clone();
+    let registry_path = config.registry_path.clone();
     let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
    
-    //let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::require_auth);
     let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::check_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
-
-    //let debug_middleware = axum::middleware::from_fn(extreme_debug_middleware);
     
     let app = Router::new()
         .route("/token", routing::get(api::auth::auth_basic_get)
@@ -190,7 +246,6 @@ async fn main() -> anyhow::Result<()> {
             .layer(auth_middleware) // require auth for ALL v2 routes
         )
         .with_state(state)
-        //.layer(debug_middleware)
         .layer(TraceLayer::new_for_http());
 
     let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
@@ -199,7 +254,9 @@ async fn main() -> anyhow::Result<()> {
         Some(tls) if tls.enable => {
             info!("Starting https server, listening on {}", app_addr);
         
-            let config = RustlsConfig::from_pem_file(&tls.cert, &tls.key).await?;
+            let cert_path = path_relative_to(&registry_path, &tls.cert);
+            let key_path = path_relative_to(&registry_path, &tls.key);
+            let config = RustlsConfig::from_pem_file(&cert_path, &key_path).await?;
 
             axum_server::bind_rustls(app_addr, config)
                 .serve(layered_app.into_make_service())
