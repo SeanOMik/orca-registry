@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use tracing::{debug, warn};
+use tracing::{debug, warn, error};
 
 use crate::app_state::AppState;
 use crate::byte_stream::ByteStream;
@@ -33,6 +33,27 @@ pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> Result<Respo
 pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, String)>, headers: HeaderMap, state: State<Arc<AppState>>, mut body: BodyStream) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await?;
+
+    // verify request range is correct
+    // this ensures that out-of-order uploads are not attempted, and that
+    // previous blobs are not overwritten
+    if let Some(range) = headers.get("content-range") {
+        let range = range.to_str()
+            .map_err(|_| AppError::BadRequest)?;
+        let (start, end) = range.split_once("-")
+            .ok_or(AppError::BadRequest)?;
+
+        let start = start.parse::<usize>()
+            .map_err(|_| AppError::BadRequest)?;
+        let end = end.parse::<usize>()
+            .map_err(|_| AppError::BadRequest)?;
+
+        let current_size = current_size.unwrap_or(0);
+        if start != current_size {
+            debug!("Out-of-order blob upload caught, range: {}-{}, current size: {}", start, end, current_size);
+            return Ok(StatusCode::RANGE_NOT_SATISFIABLE.into_response());
+        }
+    }
 
     let written_size = match storage.supports_streaming().await {
         true => {
