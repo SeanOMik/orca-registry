@@ -192,11 +192,12 @@ impl FromRequestParts<Arc<AppState>> for UserAuth {
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct Permission: u32 {
-        const NONE = 0b0000;
-        const PULL = 0b0001;
-        const PUSH = 0b0010;
-        const EDIT = 0b0111;
-        const ADMIN = 0b1111;
+        const NONE = 0b00000;
+        const PULL = 0b00001;
+        const PUSH = 0b00010;
+        const EDIT = 0b00111;
+        const DELETE = 0b01111;
+        const ADMIN = 0b11111;
     }
 }
 

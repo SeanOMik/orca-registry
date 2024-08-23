@@ -1,5 +1,5 @@
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use std::fmt;
 
@@ -28,6 +28,8 @@ pub enum Action {
     Push,
     #[serde(rename = "pull")]
     Pull,
+    #[serde(rename = "delete")]
+    Delete,
 }
 
 impl fmt::Display for Action {
@@ -36,6 +38,7 @@ impl fmt::Display for Action {
             Action::None => write!(f, ""),
             Action::Push => write!(f, "push"),
             Action::Pull => write!(f, "pull"),
+            Action::Delete => write!(f, "delete"),
         }
     }
 }
@@ -84,8 +87,18 @@ impl fmt::Display for Scope {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ScopeParseError {
+    #[error("Invalid scope type: '{0}'")]
+    InvalidScopeType(String),
+    #[error("Invalid action: '{0}'")]
+    InvalidAction(String),
+    #[error("Malformed scope string, unable to parse")]
+    Malformed
+}
+
 impl TryFrom<&str> for Scope {
-    type Error = anyhow::Error;
+    type Error = ScopeParseError;
 
     fn try_from(val: &str) -> Result<Self, Self::Error> {
         let splits: Vec<&str> = val.split(":").collect();
@@ -93,19 +106,19 @@ impl TryFrom<&str> for Scope {
             let scope_type = match splits[0] {
                 "repository" => ScopeType::Repository,
                 _ => {
-                    return Err(anyhow!("Invalid scope type: `{}`!", splits[0]));
-                    //return Err(serde::de::Error::custom(format!("Invalid scope type: `{}`!", splits[0])));
+                    return Err(ScopeParseError::InvalidScopeType(splits[0].into()));
                 }
             };
 
             let path = splits[1];
 
-            let actions: Result<Vec<Action>, anyhow::Error> = splits[2]
+            let actions: Result<Vec<Action>, _> = splits[2]
                 .split(",")
                 .map(|a| match a {
                     "pull" => Ok(Action::Pull),
                     "push" => Ok(Action::Push),
-                    _ => Err(anyhow!("Invalid action: `{}`!", a)), //Err(serde::de::Error::custom(format!("Invalid action: `{}`!", a))),
+                    "delete" => Ok(Action::Delete),
+                    _ => Err(ScopeParseError::InvalidAction(a.into())),
                 }).collect();
             let actions = actions?;
 
@@ -115,8 +128,7 @@ impl TryFrom<&str> for Scope {
                 actions
             })
         } else {
-            Err(anyhow!("Malformed scope string!"))
-            //Err(serde::de::Error::custom("Malformed scope string!"))
+            Err(ScopeParseError::Malformed)
         }
     }
 }
