@@ -12,7 +12,7 @@ use crate::dto::RepositoryVisibility;
 use crate::dto::digest::Digest;
 use crate::dto::manifest::Manifest;
 use crate::dto::user::UserAuth;
-use crate::error::AppError;
+use crate::error::{AppError, OciRegistryError};
 
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth, body: String) -> Result<Response, AppError> {
     // Calculate the sha256 digest for the manifest.
@@ -35,7 +35,9 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
 
     info!("Saved manifest {}", calculated_digest);
 
-    match serde_json::from_str(&body)? {
+    match serde_json::from_str(&body)
+        .map_err(|_| OciRegistryError::ManifestInvalid)?
+    {
         Manifest::Image(image) => {
             // Link the manifest to the image layer
             database.link_manifest_layer(&calculated_digest, &image.config.digest).await?;
@@ -52,7 +54,7 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
             ).into_response())
         },
         Manifest::List(_list) => {
-            warn!("ManifestList request was received!");
+            warn!("TODO: ManifestList request was received!");
 
             Ok(StatusCode::NOT_IMPLEMENTED.into_response())
         }
@@ -75,10 +77,8 @@ pub async fn pull_manifest_get(Path((name, reference)): Path<(String, String)>, 
 
     let manifest_content = database.get_manifest(&name, &digest).await?;
     if manifest_content.is_none() {
-        debug!("Failed to get manifest in repo {}, for digest {}", name, digest);
-        // The digest that was provided in the request was invalid.
-        // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
-        return Ok(StatusCode::NOT_FOUND.into_response());
+        info!("Unknown manifest in repo {} for digest {}", name, digest);
+        return Err(OciRegistryError::ManifestUnknown.into());
     }
     let manifest_content = manifest_content.unwrap();
 

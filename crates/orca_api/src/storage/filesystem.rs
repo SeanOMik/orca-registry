@@ -6,10 +6,11 @@ use bytes::Bytes;
 use futures::StreamExt;
 use tokio::{fs, io::{AsyncWriteExt, AsyncReadExt}};
 use tokio_util::io::ReaderStream;
+use tracing::error;
 
 use crate::byte_stream::ByteStream;
 
-use super::StorageDriver;
+use super::{StorageDriver, StorageDriverError};
 
 pub struct FilesystemDriver {
     storage_path: String,
@@ -38,13 +39,13 @@ impl StorageDriver for FilesystemDriver {
         true
     }
 
-    async fn has_digest(&self, digest: &str) -> anyhow::Result<bool> {
+    async fn has_digest(&self, digest: &str) -> Result<bool, StorageDriverError> {
         let path = self.get_digest_path(digest);
 
         Ok(Path::new(&path).exists())
     }
 
-    async fn save_digest_stream(&self, digest: &str, mut stream: ByteStream, append: bool) -> anyhow::Result<usize> {
+    async fn save_digest_stream(&self, digest: &str, mut stream: ByteStream, append: bool) -> Result<usize, StorageDriverError> {
         self.ensure_storage_path()?;
 
         let path = self.get_digest_path(digest);
@@ -66,7 +67,7 @@ impl StorageDriver for FilesystemDriver {
         Ok(len)
     }
 
-    async fn get_digest(&self, digest: &str) -> anyhow::Result<Option<Bytes>> {
+    async fn get_digest(&self, digest: &str) -> Result<Option<Bytes>, StorageDriverError> {
         let mut file = match fs::File::open(self.get_digest_path(digest))
             .await {
             
@@ -76,8 +77,8 @@ impl StorageDriver for FilesystemDriver {
                     return Ok(None)
                 },
                 _ => {
-                    return Err(e)
-                        .context("FilesystemDriver: Failure to open digest file");
+                    error!("Failure attempting to open digest file: {:?}", e);
+                    return Err(e.into());
                 }
             }
         }; 
@@ -88,7 +89,7 @@ impl StorageDriver for FilesystemDriver {
         Ok(Some(Bytes::from_iter(buf)))
     }
 
-    async fn get_digest_stream(&self, digest: &str) -> anyhow::Result<Option<ByteStream>> {
+    async fn get_digest_stream(&self, digest: &str) -> Result<Option<ByteStream>, StorageDriverError> {
         let file = match fs::File::open(self.get_digest_path(digest)).await {
             Ok(f) => f,
             Err(e) => match e.kind() {
@@ -96,7 +97,8 @@ impl StorageDriver for FilesystemDriver {
                     return Ok(None)
                 },
                 _ => {
-                    return Err(e).context("FilesystemDriver: Failure to open digest file");
+                    error!("Failure attempting to open digest file: {:?}", e);
+                    return Err(e.into());
                 }
             }
         };
@@ -105,7 +107,7 @@ impl StorageDriver for FilesystemDriver {
         Ok(Some(ByteStream::new(s)))
     }
 
-    async fn digest_length(&self, digest: &str) -> anyhow::Result<Option<usize>> {
+    async fn digest_length(&self, digest: &str) -> Result<Option<usize>, StorageDriverError> {
         let file = match fs::File::open(self.get_digest_path(digest))
             .await {
             
@@ -115,8 +117,8 @@ impl StorageDriver for FilesystemDriver {
                     return Ok(None)
                 },
                 _ => {
-                    return Err(e)
-                        .context("FilesystemDriver: Failure to open digest file");
+                    error!("Failure attempting to open digest file: {:?}", e);
+                    return Err(e.into());
                 }
             }
         };
@@ -124,7 +126,7 @@ impl StorageDriver for FilesystemDriver {
         Ok(Some(file.metadata().await?.len() as usize))
     }
 
-    async fn save_digest(&self, digest: &str, bytes: &Bytes, append: bool) -> anyhow::Result<()> {
+    async fn save_digest(&self, digest: &str, bytes: &Bytes, append: bool) -> Result<(), StorageDriverError> {
         let path = self.get_digest_path(digest);
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -137,20 +139,20 @@ impl StorageDriver for FilesystemDriver {
         Ok(())
     }
 
-    async fn delete_digest(&self, digest: &str) -> anyhow::Result<()> {
+    async fn delete_digest(&self, digest: &str) -> Result<(), StorageDriverError> {
         let path = self.get_digest_path(digest);
         fs::remove_file(path).await?;
 
         Ok(())
     }
 
-    async fn replace_digest(&self, uuid: &str, digest: &str) -> anyhow::Result<()> {
+    async fn replace_digest(&self, uuid: &str, digest: &str) -> Result<(), StorageDriverError> {
         let path = self.get_digest_path(uuid);
         let path = Path::new(&path);
         let parent = path
             .clone()
             .parent()
-            .ok_or(anyhow!("Failure to get parent path of digest file!"))?;
+            .expect("Failed to get parent path of digest file");
 
         fs::rename(path, format!("{}/{}", parent.display(), digest)).await?;
 

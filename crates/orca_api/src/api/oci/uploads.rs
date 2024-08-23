@@ -12,7 +12,7 @@ use tracing::{debug, warn};
 
 use crate::app_state::AppState;
 use crate::byte_stream::ByteStream;
-use crate::error::AppError;
+use crate::error::{AppError, OciRegistryError};
 
 /// Starting an upload
 pub async fn start_upload_post(Path((name, )): Path<(String, )>) -> Result<Response, AppError> {
@@ -56,7 +56,8 @@ pub async fn chunked_upload_layer_patch(Path((name, layer_uuid)): Path<(String, 
 
             let mut bytes = BytesMut::new();
             while let Some(item) = body.next().await {
-                bytes.extend_from_slice(&item?);
+                let item = item.map_err(|_| OciRegistryError::BlobUploadInvalid)?;
+                bytes.extend_from_slice(&item);
             }
 
             let bytes_len = bytes.len();

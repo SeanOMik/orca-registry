@@ -1,12 +1,12 @@
 pub mod ldap_driver;
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{extract::State, http::{StatusCode, HeaderMap, header, HeaderName, Request, Method}, middleware::Next, response::{Response, IntoResponse}};
 
 use tracing::{debug, warn, error};
 
-use crate::{app_state::AppState, dto::{user::{Permission, RegistryUserType, UserAuth}, RepositoryVisibility, scope::{Scope, ScopeType, Action}}, config::Config};
+use crate::{app_state::AppState, config::Config, dto::{scope::{Action, Scope, ScopeType}, user::{Permission, RegistryUserType, UserAuth}, RepositoryVisibility}, error::{ErrorMessage, OciRegistryError}};
 use crate::database::Database;
 
 use async_trait::async_trait;
@@ -56,7 +56,7 @@ where
     }
 
     async fn verify_user_login(&mut self, email: String, password: String) -> anyhow::Result<bool> {
-        Database::verify_user_login(self, email, password).await
+        Ok(Database::verify_user_login(self, email, password).await?)
     }
 }
 
@@ -87,12 +87,18 @@ type Rejection = (StatusCode, HeaderMap);
 /// Creates a response with an Unauthorized (401) status code.
 /// The www-authenticate header is set to notify the client of where to authorize with.
 #[inline(always)]
-pub fn auth_challenge_response(config: &Config, scope: Option<Scope>) -> Response {
+pub fn auth_challenge_response(config: &Config, scope: Option<Scope>, errors: Vec<ErrorMessage>) -> Response {
     let bearer = match scope {
         Some(scope) => format!("Bearer realm=\"{}/token\",scope=\"{}\"", config.url(), scope),
         None => format!("Bearer realm=\"{}/token\"", config.url())
     };
     debug!("responding with www-authenticate header of: \"{}\"", bearer);
+
+    let mut body = HashMap::new();
+    if !errors.is_empty() {
+        debug!("errors: {:?}", errors);
+        body.insert("errors", errors);
+    }
 
     (
         StatusCode::UNAUTHORIZED,
@@ -101,19 +107,31 @@ pub fn auth_challenge_response(config: &Config, scope: Option<Scope>) -> Respons
             ( header::CONTENT_TYPE, "application/json".to_string() ),
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
         ],
-        //"{\"errors\":[{\"code\":\"UNAUTHORIZED\",\"message\":\"access to the requested resource is not authorized\",\"detail\":[{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"pull\"},{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"push\"}]}]}"
+        axum::Json(body),
     ).into_response()
 }
 
 /// Creates a response with a Forbidden (403) status code.
 /// No other headers are set.
 #[inline(always)]
-pub fn access_denied_response(_config: &Config) -> Response {
+pub fn access_denied_response(_config: &Config, scope: &Scope) -> Response {
+    let details = serde_json::to_string(&scope.to_error_details()).unwrap();
+    let e = ErrorMessage {
+        code: OciRegistryError::Denied,
+        message: Some("access to the requested resource is denied".into()),
+        detail: Some(details),
+    };
+
+    let mut body = HashMap::new();
+    body.insert("errors", vec![e]);
+
     (
         StatusCode::FORBIDDEN,
         [
-            ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() )
-        ]
+            ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() ),
+            ( HeaderName::from_static("content-type"), "application/json".to_string() )
+        ],
+        axum::Json(body),
     ).into_response()
 }
 
@@ -126,7 +144,7 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
         // if auth is none, then the client needs to authenticate
         if auth.is_none() {
             debug!("Responding to /v2/ with an auth challenge");
-            return Ok(auth_challenge_response(config, None));
+            return Ok(auth_challenge_response(config, None, vec![]));
         }
 
         debug!("user is authed");
@@ -152,7 +170,7 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
         //if !headers.contains_key(header::AUTHORIZATION) && auth.is_none() {
         if auth.is_none() {
             debug!("User is not authenticated, sending challenge");
-            return Ok(auth_challenge_response(config, Some(scope)));
+            return Ok(auth_challenge_response(config, Some(scope), vec![]));
         }
         let auth = auth.unwrap();
 
@@ -175,7 +193,19 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
 
             if let Some(user) = &auth.user {
                 match auth_checker.user_has_permission(user.email.clone(), target_name.clone(), permission, vis).await {
-                    Ok(false) => return Ok(auth_challenge_response(config, Some(scope))),
+                    Ok(false) => {
+                        debug!("User does not have permission for repository");
+
+                        ////"{\"errors\":[{\"code\":\"UNAUTHORIZED\",\"message\":\"access to the requested resource is not authorized\",\"detail\":[{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"pull\"},{\"Type\":\"repository\",\"Name\":\"samalba/my-app\",\"Action\":\"push\"}]}]}"
+                        /* let details = serde_json::to_string(&scope.to_error_details()).unwrap();
+                        let e = ErrorMessage {
+                            code: OciRegistryError::Denied,
+                            message: Some("access to the requested resource is denied".into()),
+                            detail: Some(details),
+                        }; */
+                        //return Ok(auth_challenge_response(config, Some(scope), vec![e]));
+                        return Ok(access_denied_response(config, &scope));
+                    }
                     Ok(true) => { },
                     Err(e) => {
                         error!("Error when checking user permissions! {}", e);
@@ -186,14 +216,14 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
             } else {
                 // anonymous users can ONLY pull from public repos
                 if permission != Permission::PULL {
-                    return Ok(access_denied_response(config));
+                    return Ok(access_denied_response(config, &scope));
                 }
 
                 // ensure the repo is public
                 let database = &state.database;
                 if let Some(RepositoryVisibility::Private) = database.get_repository_visibility(&target_name).await
                         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()))? {
-                    return Ok(access_denied_response(config));
+                    return Ok(access_denied_response(config, &scope));
                 }
             }
         }

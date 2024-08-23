@@ -57,16 +57,16 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
         name,
         tags: tags.into_iter().map(|t| t.name).collect(),
     };
-    let response_body = serde_json::to_string(&tag_list)?;
+    let response_body = serde_json::to_string(&tag_list).unwrap();
 
     // Create headers
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
-    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse()?);
+    headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
 
     // Add the link header if it was constructed
     if let Some(link_header) = link_header {
-        headers.insert(header::LINK, link_header.parse()?);
+        headers.insert(header::LINK, link_header.parse().unwrap());
     }
 
     Ok((

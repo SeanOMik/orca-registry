@@ -55,14 +55,14 @@ pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, sta
     let repo_list = RepositoryList {
         repositories,
     };
-    let response_body = serde_json::to_string(&repo_list)?;
+    let response_body = serde_json::to_string(&repo_list).unwrap();
     
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
-    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse()?);
+    headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
 
     if let Some(link_header) = link_header {
-        headers.insert(header::LINK, link_header.parse()?);
+        headers.insert(header::LINK, link_header.parse().unwrap());
     }
 
     // Construct the response, optionally adding the Link header if it was constructed.
