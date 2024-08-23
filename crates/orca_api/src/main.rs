@@ -142,13 +142,13 @@ async fn main() -> anyhow::Result<()> {
             )
         };
 
-        // Change filter to only log orca_registry or everything
+        // Change filter to only log orca_api or everything
         let targets_filter = if logc.env_filter.is_some() {
             None
         } else {
             Some(
                 filter::Targets::new()
-                    .with_target("orca_registry", logc.level)
+                    .with_target("orca_api", logc.level)
                     .with_default(LevelFilter::INFO)
             )
         };
