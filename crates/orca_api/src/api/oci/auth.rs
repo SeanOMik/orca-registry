@@ -21,7 +21,7 @@ use sha2::Sha256;
 
 use rand::Rng;
 
-use crate::{database::Database, dto::scope::Action};
+use crate::{database::Database, dto::scope::Action, error::{ErrorMessage, OciRegistryError}};
 use crate::{
     app_state::AppState,
     dto::{
@@ -312,10 +312,17 @@ pub async fn auth_basic_get(
                 .first()
                 .and_then(|s| Some(s.clone()));
 
+            let e = ErrorMessage {
+                code: OciRegistryError::Unauthorized,
+                message: Some("incorrect email or password".into()),
+                detail: None,
+            };
+
             // TODO: Dont unwrap, find a way to return multiple scopes
             return Ok(auth_challenge_response(
                 &state.config,
                 scope,
+                vec![e],
             ));
         }
         drop(auth_driver);

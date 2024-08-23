@@ -1615,6 +1615,7 @@ dependencies = [
  "sha2",
  "sha256",
  "sqlx",
+ "thiserror",
  "tokio",
  "tokio-util",
  "tower-http",

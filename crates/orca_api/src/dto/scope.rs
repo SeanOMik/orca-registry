@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use std::fmt;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ScopeType {
     #[default]
     Unknown,
@@ -20,7 +20,7 @@ impl fmt::Display for ScopeType {
     }
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Action {
     #[default]
     None,
@@ -55,6 +55,20 @@ impl Scope {
             name: path,
             actions: actions.to_vec(),
         }
+    }
+
+    pub fn to_error_details(&self) -> Vec<ScopeDetail> {
+        let mut details = vec![];
+
+        for action in &self.actions {
+            details.push(ScopeDetail {
+                scope_type: self.scope_type,
+                name: self.name.clone(),
+                action: *action,
+            })
+        }
+
+        details
     }
 }
 
@@ -105,4 +119,13 @@ impl TryFrom<&str> for Scope {
             //Err(serde::de::Error::custom("Malformed scope string!"))
         }
     }
+}
+
+
+#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScopeDetail {
+    #[serde(rename = "type")]
+    pub scope_type: ScopeType,
+    pub name: String,
+    pub action: Action,
 }

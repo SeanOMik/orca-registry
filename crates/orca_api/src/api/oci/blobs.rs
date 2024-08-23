@@ -36,6 +36,7 @@ pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>
         let mut stream = match storage.get_digest_stream(&layer_digest).await? {
             Some(s) => s,
             None => {
+                // returns None when the digest was not found
                 return Ok(StatusCode::NOT_FOUND.into_response());
             }
         };
@@ -84,8 +85,6 @@ pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>
                 body
             ).into_response())
         }
-
-        
     } else {
         Ok(StatusCode::NOT_FOUND.into_response())
     }
