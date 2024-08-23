@@ -82,3 +82,6 @@ CREATE TABLE IF NOT EXISTS user_tokens (
 INSERT OR IGNORE INTO users (username, email, login_source) VALUES ('admin', 'admin@example.com', 0);
 INSERT OR IGNORE INTO user_logins (email, password_hash, password_salt) VALUES ('admin@example.com', '$2y$05$v9ND7dQKvfkOtY4XpnKVaOpvV0F5RDnW1Ec.nfkZ0vmEjLX5D5S8e', 'x5ECk0jUmOSfBWxW52wsyO');
 INSERT OR IGNORE INTO user_registry_permissions (email, user_type) VALUES ('admin@example.com', 1);
+
+-- create other repository owned by admin user
+INSERT OR IGNORE INTO repositories (name, owning_project, owner_email, visibility) VALUES ('conformance-test', '', 'admin@example.com', 0);
