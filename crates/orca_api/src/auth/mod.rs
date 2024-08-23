@@ -161,7 +161,11 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
         let scope_actions: &[Action] = match request.method().clone() {
             Method::GET | Method::HEAD => &[Action::Pull],
             Method::POST | Method::PATCH | Method::PUT => &[Action::Pull, Action::Push],
-            _ => &[],
+            Method::DELETE => &[Action::Pull, Action::Push, Action::Delete],
+            _ => {
+                error!("Unexpected method ({:?}), unable to create scope actions", request.method());
+                return Ok(StatusCode::METHOD_NOT_ALLOWED.into_response());
+            },
         };
         let scope = Scope::new(ScopeType::Repository, target_name.clone(), scope_actions);
 
@@ -181,6 +185,7 @@ pub async fn check_auth<B>(State(state): State<Arc<AppState>>, auth: Option<User
             let permission = match action {
                 Action::Pull => Permission::PULL,
                 Action::Push => Permission::PUSH,
+                Action::Delete => Permission::DELETE,
                 _ => Permission::NONE,
             };
 

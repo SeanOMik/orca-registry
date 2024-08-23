@@ -127,7 +127,8 @@ pub async fn auth_basic_get(
             Ok(scope) => {
                 auth.scope.push(scope);
             }
-            Err(_) => {
+            Err(e) => {
+                error!("Invalid scope in request: '{scope}': {:?}", e);
                 return Err(StatusCode::BAD_REQUEST);
             }
         }
@@ -215,7 +216,7 @@ pub async fn auth_basic_get(
             };
     
             let json_str = serde_json::to_string(&auth_response)
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
+                .expect("failed to serialize AuthResponse");
     
             debug!("Created anonymous token for public scopes!");
 
@@ -353,7 +354,8 @@ pub async fn auth_basic_get(
         };
 
         let json_str =
-            serde_json::to_string(&auth_response).map_err(|_| StatusCode::BAD_REQUEST)?;
+            serde_json::to_string(&auth_response)
+            .expect("failed to serialize AuthResponse");
 
         let database = &state.database;
         database
