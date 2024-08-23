@@ -3,6 +3,10 @@ listen_port = "3000"
 ## The full path of the registry
 url = "http://localhost:3000/"
 
+#[limits]
+## Manifest limit size in bytes
+#manifest_limit = 10000000 # 10Mb
+
 [log]
 ## The minimum level of logs (ignored if 'env_filter' is specified)
 level = "info"

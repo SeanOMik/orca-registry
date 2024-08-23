@@ -15,6 +15,11 @@ use crate::dto::user::UserAuth;
 use crate::error::{AppError, OciRegistryError};
 
 pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>, state: State<Arc<AppState>>, auth: UserAuth, body: String) -> Result<Response, AppError> {
+    // enforce manifest size limit
+    if body.len() > state.config.limits.manifest_limit {
+        return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
+    }
+    
     // Calculate the sha256 digest for the manifest.
     let calculated_hash = sha256::digest(body.clone());
     let calculated_digest = format!("sha256:{}", calculated_hash);
@@ -23,6 +28,19 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     let user = auth.user.unwrap();
 
     let database = &state.database;
+
+    // if the manifest already exists, respond now and don't try to make it again.
+    if database.get_manifest(&name, &calculated_digest).await?.is_some() {
+        // no need to check the contents of the manifest since the calculated_digest
+        // will match the content of it.
+        return Ok((
+            StatusCode::CREATED,
+            [
+                (HeaderName::from_static("docker-content-digest"), calculated_digest),
+                (header::LOCATION, format!("/v2/{name}/manifests/{reference}"))
+            ]
+        ).into_response());
+    }
 
     // Create the image repository and save the image manifest. This repository will be private by default
     database.save_repository(&name, RepositoryVisibility::Private, Some(user.email), None).await?;
@@ -40,17 +58,22 @@ pub async fn upload_manifest_put(Path((name, reference)): Path<(String, String)>
     {
         Manifest::Image(image) => {
             // Link the manifest to the image layer
+            debug!("Linking manifest {} to layer {}", calculated_digest, image.config.digest);
             database.link_manifest_layer(&calculated_digest, &image.config.digest).await?;
             debug!("Linked manifest {} to layer {}", calculated_digest, image.config.digest);
 
             for layer in image.layers {
+                debug!("Linking manifest {} to layer {}", calculated_digest, layer.digest);
                 database.link_manifest_layer(&calculated_digest, &layer.digest).await?;
-                debug!("Linked manifest {} to layer {}", calculated_digest, image.config.digest);
+                debug!("Linked manifest {} to layer {}", calculated_digest, layer.digest);
             }
 
             Ok((
                 StatusCode::CREATED,
-                [ (HeaderName::from_static("docker-content-digest"), calculated_digest) ]
+                [
+                    (HeaderName::from_static("docker-content-digest"), calculated_digest),
+                    (header::LOCATION, format!("/v2/{name}/manifests/{reference}"))
+                ]
             ).into_response())
         },
         Manifest::List(_list) => {

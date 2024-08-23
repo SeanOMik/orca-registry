@@ -47,6 +47,21 @@ pub struct SqliteDbConfig {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct LimitConfig {
+    /// Limit of manifest in bytes
+    pub manifest_limit: usize,
+}
+
+impl Default for LimitConfig {
+    fn default() -> Self {
+        Self {
+            // 4Mb in bytes
+            manifest_limit: 4000000
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
 pub struct TlsConfig {
     pub enable: bool,
     pub key: String,
@@ -100,6 +115,8 @@ pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
+    #[serde(default)]
+    pub limits: LimitConfig,
     pub log: LogConfig,
     pub ldap: Option<LdapConnectionConfig>,
     pub database: DatabaseConfig,
