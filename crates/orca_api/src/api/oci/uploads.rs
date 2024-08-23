@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use tracing::{debug, warn, error};
+use tracing::{debug, warn};
 
 use crate::app_state::AppState;
 use crate::byte_stream::ByteStream;
@@ -150,15 +150,18 @@ pub async fn cancel_upload_delete(Path((_name, layer_uuid)): Path<(String, Strin
 
 pub async fn check_upload_status_get(Path((name, layer_uuid)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
-    let ending = storage.digest_length(&layer_uuid).await?.unwrap_or(0);
-
-    Ok((
-        StatusCode::CREATED,
-        [
-            (header::LOCATION, format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)),
-            (header::RANGE, format!("0-{}", ending - 1)),
-            (header::CONTENT_LENGTH, "0".to_string()),
-            (HeaderName::from_static("docker-upload-digest"), layer_uuid)
-        ]
-    ).into_response())
+    if let Some(len) = storage.digest_length(&layer_uuid).await? {
+        Ok((
+            StatusCode::NO_CONTENT,
+            [
+                (header::LOCATION, format!("/v2/{}/blobs/uploads/{}", name, layer_uuid)),
+                (header::RANGE, format!("0-{}", len - 1)),
+                // must always be zero, per the spec
+                (header::CONTENT_LENGTH, "0".to_string()),
+                //(HeaderName::from_static("Blob-Upload-Session-ID"), layer_uuid)
+            ]
+        ).into_response())
+    } else {
+        Ok(StatusCode::NOT_FOUND.into_response())
+    }
 }

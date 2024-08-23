@@ -59,10 +59,27 @@ impl IntoResponse for AppError {
         //todo!()
 
         match self {
-            AppError::OciRegistry(e) => todo!(),
+            /* AppError::OciRegistry(e) => match e {
+                OciRegistryError::BlobUnknown => todo!(),
+                OciRegistryError::BlobUploadInvalid => todo!(),
+                OciRegistryError::BlobUploadUnknown => todo!(),
+                OciRegistryError::DigestInvalid { specified, expected } => todo!(),
+                OciRegistryError::ManifestBlobUnknown => todo!(),
+                OciRegistryError::ManifestInvalid => todo!(),
+                OciRegistryError::ManifestUnknown => todo!(),
+                OciRegistryError::NameInvalid => todo!(),
+                OciRegistryError::NameUnknown => todo!(),
+                OciRegistryError::SizeInvalid => todo!(),
+                OciRegistryError::Unauthorized => todo!(),
+                OciRegistryError::Denied => todo!(),
+                OciRegistryError::Unsupported => todo!(),
+                OciRegistryError::TooManyRequests => todo!(),
+            }, */
             //AppError::Storage(e) => todo!(),
             //AppError::Database(e) => todo!(),
-            AppError::BadRequest => todo!(),
+            AppError::BadRequest => {
+                StatusCode::BAD_REQUEST.into_response()
+            },
             //AppError::Other(e) => todo!(),
             _ => {
                 (

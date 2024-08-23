@@ -96,7 +96,6 @@ pub fn auth_challenge_response(config: &Config, scope: Option<Scope>, errors: Ve
 
     let mut body = HashMap::new();
     if !errors.is_empty() {
-        debug!("errors: {:?}", errors);
         body.insert("errors", errors);
     }
 
