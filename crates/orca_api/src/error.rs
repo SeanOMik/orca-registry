@@ -1,4 +1,4 @@
-use axum::response::{IntoResponse, Response};
+use axum::{http::StatusCode, response::{IntoResponse, Response}};
 use serde::{Deserialize, Serialize};
 
 use crate::{database::DatabaseError, storage::StorageDriverError};
@@ -47,6 +47,8 @@ pub enum AppError {
     Storage(#[from] StorageDriverError),
     #[error("{0}")]
     Database(#[from] DatabaseError),
+    #[error("Bad client request")]
+    BadRequest,
     #[error("{0}")]
     Other(anyhow::Error),
 }
@@ -54,7 +56,21 @@ pub enum AppError {
 // Tell axum how to convert `AppError` into a response.
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        todo!()
+        //todo!()
+
+        match self {
+            AppError::OciRegistry(e) => todo!(),
+            //AppError::Storage(e) => todo!(),
+            //AppError::Database(e) => todo!(),
+            AppError::BadRequest => todo!(),
+            //AppError::Other(e) => todo!(),
+            _ => {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Something went wrong: {}", self),
+                ).into_response()
+            }
+        }
         /* (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Something went wrong: {}", self.0),
