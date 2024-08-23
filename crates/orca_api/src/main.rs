@@ -71,6 +71,7 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resu
     Ok(next.run(request).await)
 }
 
+/// Create directory tree up to the file in `path`.
 fn create_path_to(path: &str) -> io::Result<()> {
     let path = PathBuf::from(path);
 
@@ -173,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create a database file if it doesn't exist already
     if !Path::new(&sqlite_config.path).exists() {
-        fs::create_dir_all(&sqlite_config.path)?;
+        create_path_to(&sqlite_config.path)?;
         File::create(&sqlite_config.path).await?;
     }
     
@@ -214,29 +215,29 @@ async fn main() -> anyhow::Result<()> {
     let path_middleware = axum::middleware::from_fn(change_request_paths);
     
     let app = Router::new()
-        .route("/token", routing::get(api::auth::auth_basic_get)
-            .post(api::auth::auth_basic_post))
+        .route("/token", routing::get(api::oci::auth::auth_basic_get)
+            .post(api::oci::auth::auth_basic_post))
         .nest("/v2", Router::new()
-            .route("/", routing::get(api::version_check))
-            .route("/_catalog", routing::get(api::catalog::list_repositories))
-            .route("/:name/tags/list", routing::get(api::tags::list_tags))
+            .route("/", routing::get(api::oci::version_check))
+            .route("/_catalog", routing::get(api::oci::catalog::list_repositories))
+            .route("/:name/tags/list", routing::get(api::oci::tags::list_tags))
             .nest("/:name/blobs", Router::new()
-                .route("/:digest", routing::get(api::blobs::pull_digest_get)
-                    .head(api::blobs::digest_exists_head)
-                    .delete(api::blobs::delete_digest))
+                .route("/:digest", routing::get(api::oci::blobs::pull_digest_get)
+                    .head(api::oci::blobs::digest_exists_head)
+                    .delete(api::oci::blobs::delete_digest))
                 .nest("/uploads", Router::new()
-                    .route("/", routing::post(api::uploads::start_upload_post))
-                    .route("/:uuid", routing::patch(api::uploads::chunked_upload_layer_patch)
-                        .put(api::uploads::finish_chunked_upload_put)
-                        .delete(api::uploads::cancel_upload_delete)
-                        .get(api::uploads::check_upload_status_get)
+                    .route("/", routing::post(api::oci::uploads::start_upload_post))
+                    .route("/:uuid", routing::patch(api::oci::uploads::chunked_upload_layer_patch)
+                        .put(api::oci::uploads::finish_chunked_upload_put)
+                        .delete(api::oci::uploads::cancel_upload_delete)
+                        .get(api::oci::uploads::check_upload_status_get)
                     )
                 )
             )
-            .route("/:name/manifests/:reference", routing::get(api::manifests::pull_manifest_get)
-                .put(api::manifests::upload_manifest_put)
-                .head(api::manifests::manifest_exists_head)
-                .delete(api::manifests::delete_manifest))
+            .route("/:name/manifests/:reference", routing::get(api::oci::manifests::pull_manifest_get)
+                .put(api::oci::manifests::upload_manifest_put)
+                .head(api::oci::manifests::manifest_exists_head)
+                .delete(api::oci::manifests::delete_manifest))
             .layer(auth_middleware) // require auth for ALL v2 routes
         )
         .with_state(state)
