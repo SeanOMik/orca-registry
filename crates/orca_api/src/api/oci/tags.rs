@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::{Path, Query, State}, response::{IntoResponse, Response}, http::{StatusCode, header, HeaderMap, HeaderName}};
-use serde::{Serialize, Deserialize};
+use axum::{
+    extract::{Path, Query, State},
+    http::{header, HeaderMap, HeaderName, StatusCode},
+    response::{IntoResponse, Response},
+};
+use serde::{Deserialize, Serialize};
 
 use crate::{app_state::AppState, database::Database, error::AppError};
 
@@ -21,17 +25,22 @@ pub struct ListRepositoriesParams {
     last_tag: Option<String>,
 }
 
-pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
+pub async fn list_tags(
+    Path((name,)): Path<(String,)>,
+    Query(params): Query<ListRepositoriesParams>,
+    state: State<Arc<AppState>>,
+) -> Result<Response, AppError> {
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
     let database = &state.database;
     let tags = match params.limit {
         Some(limit) => {
-
             // Convert the last param to a String, and list all the tags
             let last_tag = params.last_tag.and_then(|t| Some(t.to_string()));
-            let tags = database.list_repository_tags_page(&name, limit, last_tag).await?;
+            let tags = database
+                .list_repository_tags_page(&name, limit, last_tag)
+                .await?;
 
             // Get the new last repository for the response
             let last_tag = tags.last();
@@ -46,10 +55,8 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
             link_header = Some(url);
 
             tags
-        },
-        None => {
-            database.list_repository_tags(&name).await?
         }
+        None => database.list_repository_tags(&name).await?,
     };
 
     // Convert the `Vec<Tag>` to a `TagList` which will be serialized to json.
@@ -62,16 +69,15 @@ pub async fn list_tags(Path((name, )): Path<(String, )>, Query(params): Query<Li
     // Create headers
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
+    headers.insert(
+        HeaderName::from_static("docker-distribution-api-version"),
+        "registry/2.0".parse().unwrap(),
+    );
 
     // Add the link header if it was constructed
     if let Some(link_header) = link_header {
         headers.insert(header::LINK, link_header.parse().unwrap());
     }
 
-    Ok((
-        StatusCode::OK,
-        headers,
-        response_body
-    ).into_response())
+    Ok((StatusCode::OK, headers, response_body).into_response())
 }
