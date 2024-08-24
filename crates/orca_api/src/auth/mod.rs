@@ -128,7 +128,7 @@ pub fn access_denied_response(_config: &Config, scope: &Scope) -> Response {
         StatusCode::FORBIDDEN,
         [
             ( HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".to_string() ),
-            ( HeaderName::from_static("content-type"), "application/json".to_string() )
+            ( header::CONTENT_TYPE, "application/json".to_string() )
         ],
         axum::Json(body),
     ).into_response()
