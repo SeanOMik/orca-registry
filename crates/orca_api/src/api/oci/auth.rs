@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::SystemTime,
-};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use axum::{
     extract::{Query, State},
@@ -21,7 +17,6 @@ use sha2::Sha256;
 
 use rand::Rng;
 
-use crate::{database::Database, dto::scope::Action, error::{ErrorMessage, OciRegistryError}};
 use crate::{
     app_state::AppState,
     dto::{
@@ -29,6 +24,11 @@ use crate::{
         user::{AuthToken, TokenInfo},
         RepositoryVisibility,
     },
+};
+use crate::{
+    database::Database,
+    dto::scope::Action,
+    error::{ErrorMessage, OciRegistryError},
 };
 
 use crate::auth::auth_challenge_response;
@@ -60,7 +60,11 @@ pub struct AuthResponse {
     issued_at: String,
 }
 
-fn create_jwt_token(jwt_key: String, account: Option<&str>, scopes: Vec<Scope>) -> anyhow::Result<TokenInfo> {
+fn create_jwt_token(
+    jwt_key: String,
+    account: Option<&str>,
+    scopes: Vec<Scope>,
+) -> anyhow::Result<TokenInfo> {
     let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_key.as_bytes())?;
 
     let now = chrono::offset::Utc::now();
@@ -98,8 +102,9 @@ pub async fn auth_basic_post() -> Result<Response, StatusCode> {
             (header::CONTENT_TYPE, "application/json"),
             (header::ALLOW, "Allow: GET, HEAD, OPTIONS"),
         ],
-        "{\"detail\": \"Method \\\"POST\\\" not allowed.\"}"
-    ).into_response());
+        "{\"detail\": \"Method \\\"POST\\\" not allowed.\"}",
+    )
+        .into_response());
 }
 
 pub async fn auth_basic_get(
@@ -198,8 +203,8 @@ pub async fn auth_basic_get(
                 scope.actions.retain(|a| *a == Action::Pull);
             }
 
-            let token = create_jwt_token(state.config.jwt_key.clone(), None, auth.scope)
-                .map_err(|_| {
+            let token =
+                create_jwt_token(state.config.jwt_key.clone(), None, auth.scope).map_err(|_| {
                     error!("Failed to create jwt token!");
 
                     StatusCode::INTERNAL_SERVER_ERROR
@@ -214,10 +219,10 @@ pub async fn auth_basic_get(
                 expires_in: 86400, // 1 day
                 issued_at: now_format,
             };
-    
-            let json_str = serde_json::to_string(&auth_response)
-                .expect("failed to serialize AuthResponse");
-    
+
+            let json_str =
+                serde_json::to_string(&auth_response).expect("failed to serialize AuthResponse");
+
             debug!("Created anonymous token for public scopes!");
 
             return Ok((
@@ -227,7 +232,8 @@ pub async fn auth_basic_get(
                     (header::AUTHORIZATION, &format!("Bearer {}", token_str)),
                 ],
                 json_str,
-            ).into_response());
+            )
+                .into_response());
         } else {
             info!("Auth failure! Auth was not provided in either AuthBasic or Form!");
 
@@ -309,9 +315,7 @@ pub async fn auth_basic_get(
             debug!("Authentication failed, incorrect password!");
 
             // TODO: Multiple scopes
-            let scope = auth.scope
-                .first()
-                .and_then(|s| Some(s.clone()));
+            let scope = auth.scope.first().and_then(|s| Some(s.clone()));
 
             let e = ErrorMessage {
                 code: OciRegistryError::Unauthorized,
@@ -320,11 +324,7 @@ pub async fn auth_basic_get(
             };
 
             // TODO: Dont unwrap, find a way to return multiple scopes
-            return Ok(auth_challenge_response(
-                &state.config,
-                scope,
-                vec![e],
-            ));
+            return Ok(auth_challenge_response(&state.config, scope, vec![e]));
         }
         drop(auth_driver);
 
@@ -354,8 +354,7 @@ pub async fn auth_basic_get(
         };
 
         let json_str =
-            serde_json::to_string(&auth_response)
-            .expect("failed to serialize AuthResponse");
+            serde_json::to_string(&auth_response).expect("failed to serialize AuthResponse");
 
         let database = &state.database;
         database

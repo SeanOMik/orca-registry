@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::{State, Query}, http::{StatusCode, header, HeaderMap, HeaderName}, response::{IntoResponse, Response}};
-use serde::{Serialize, Deserialize};
+use axum::{
+    extract::{Query, State},
+    http::{header, HeaderMap, HeaderName, StatusCode},
+    response::{IntoResponse, Response},
+};
+use serde::{Deserialize, Serialize};
 
 use crate::{app_state::AppState, database::Database, error::AppError};
 
@@ -20,14 +24,16 @@ pub struct ListRepositoriesParams {
     last_repo: Option<String>,
 }
 
-pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
+pub async fn list_repositories(
+    Query(params): Query<ListRepositoriesParams>,
+    state: State<Arc<AppState>>,
+) -> Result<Response, AppError> {
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
     let database = &state.database;
     let repositories = match params.limit {
         Some(limit) => {
-
             // Convert the last param to a String, and list all the repos
             let last_repo = params.last_repo.and_then(|t| Some(t.to_string()));
             let repos = database.list_repositories(Some(limit), last_repo).await?;
@@ -45,30 +51,25 @@ pub async fn list_repositories(Query(params): Query<ListRepositoriesParams>, sta
             link_header = Some(url);
 
             repos
-        },
-        None => {
-            database.list_repositories(None, None).await?
         }
+        None => database.list_repositories(None, None).await?,
     };
 
     // Convert the `Vec<Tag>` to a `TagList` which will be serialized to json.
-    let repo_list = RepositoryList {
-        repositories,
-    };
+    let repo_list = RepositoryList { repositories };
     let response_body = serde_json::to_string(&repo_list).unwrap();
-    
+
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
-    headers.insert(HeaderName::from_static("docker-distribution-api-version"), "registry/2.0".parse().unwrap());
+    headers.insert(
+        HeaderName::from_static("docker-distribution-api-version"),
+        "registry/2.0".parse().unwrap(),
+    );
 
     if let Some(link_header) = link_header {
         headers.insert(header::LINK, link_header.parse().unwrap());
     }
 
     // Construct the response, optionally adding the Link header if it was constructed.
-    Ok((
-        StatusCode::OK,
-        headers,
-        response_body
-    ).into_response())
+    Ok((StatusCode::OK, headers, response_body).into_response())
 }
