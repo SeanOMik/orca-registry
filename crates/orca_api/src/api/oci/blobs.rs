@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::sync::Arc;
 
 use axum::body::StreamBody;
@@ -90,6 +91,20 @@ pub async fn pull_digest_get(Path((_name, layer_digest)): Path<(String, String)>
     }
 }
 
-pub async fn delete_digest(_state: State<Arc<AppState>>) -> impl IntoResponse {
-    todo!()
+pub async fn delete_digest(Path((_name, layer_digest)): Path<(String, String)>, state: State<Arc<AppState>>) -> Result<Response, AppError> {
+    let storage = state.storage.lock().await;
+    
+    match storage.delete_digest(&layer_digest).await {
+        Ok(()) => {
+            Ok(StatusCode::ACCEPTED.into_response())
+        },
+        Err(e) => match e {
+            crate::storage::StorageDriverError::IoError(e) => if e.kind() == ErrorKind::NotFound {
+                Ok(StatusCode::NOT_FOUND.into_response())
+            } else {
+                Err(AppError::Other(e.into()))
+            },
+            crate::storage::StorageDriverError::Other(e) => Err(AppError::Other(e.into())),
+        }
+    }
 }
