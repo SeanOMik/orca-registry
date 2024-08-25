@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{database::DatabaseError, storage::StorageDriverError};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum OciRegistryError {
     #[error("blob unknown to registry")]
     BlobUnknown,
@@ -56,31 +56,37 @@ pub enum AppError {
 // Tell axum how to convert `AppError` into a response.
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        //todo!()
-
         match self {
-            /* AppError::OciRegistry(e) => match e {
-                OciRegistryError::BlobUnknown => todo!(),
-                OciRegistryError::BlobUploadInvalid => todo!(),
-                OciRegistryError::BlobUploadUnknown => todo!(),
-                OciRegistryError::DigestInvalid { specified, expected } => todo!(),
-                OciRegistryError::ManifestBlobUnknown => todo!(),
-                OciRegistryError::ManifestInvalid => todo!(),
-                OciRegistryError::ManifestUnknown => todo!(),
-                OciRegistryError::NameInvalid => todo!(),
-                OciRegistryError::NameUnknown => todo!(),
-                OciRegistryError::SizeInvalid => todo!(),
-                OciRegistryError::Unauthorized => todo!(),
-                OciRegistryError::Denied => todo!(),
-                OciRegistryError::Unsupported => todo!(),
-                OciRegistryError::TooManyRequests => todo!(),
-            }, */
+            AppError::OciRegistry(e) => {
+                let (status_code, message) = match &e {
+                    OciRegistryError::BlobUnknown => (StatusCode::NOT_FOUND, None),
+                    OciRegistryError::BlobUploadInvalid => (StatusCode::BAD_REQUEST, None),
+                    OciRegistryError::BlobUploadUnknown => (StatusCode::NOT_FOUND, None),
+                    OciRegistryError::DigestInvalid { specified, expected } => (StatusCode::BAD_REQUEST, Some(format!("invalid digest, received {specified}, expected {expected}"))),
+                    OciRegistryError::ManifestBlobUnknown => (StatusCode::NOT_FOUND, None),
+                    OciRegistryError::ManifestInvalid => (StatusCode::BAD_REQUEST, None),
+                    OciRegistryError::ManifestUnknown => (StatusCode::NOT_FOUND, None),
+                    OciRegistryError::NameInvalid => (StatusCode::BAD_REQUEST, None),
+                    OciRegistryError::NameUnknown => (StatusCode::NOT_FOUND, None),
+                    OciRegistryError::SizeInvalid => (StatusCode::BAD_REQUEST, None),
+                    OciRegistryError::Unauthorized => (StatusCode::UNAUTHORIZED, None),
+                    OciRegistryError::Denied => (StatusCode::FORBIDDEN, None),
+                    OciRegistryError::Unsupported => (StatusCode::NOT_IMPLEMENTED, None),
+                    OciRegistryError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, None),
+                };
+                
+                let err_msg = e.as_error_message(message, None);
+
+                (
+                    status_code,
+                    axum::Json(err_msg),
+                ).into_response()
+            }
             //AppError::Storage(e) => todo!(),
             //AppError::Database(e) => todo!(),
             AppError::BadRequest => {
                 StatusCode::BAD_REQUEST.into_response()
             },
-            //AppError::Other(e) => todo!(),
             _ => {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -96,27 +102,37 @@ impl IntoResponse for AppError {
     }
 }
 
+impl OciRegistryError {
+    pub fn as_string(&self) -> String {
+        match self {
+            OciRegistryError::BlobUnknown => "BLOB_UNKNOWN".into(),
+            OciRegistryError::BlobUploadInvalid => "BLOB_UPLOAD_INVALID".into(),
+            OciRegistryError::BlobUploadUnknown => "BLOB_UPLOAD_UNKNOWN".into(),
+            OciRegistryError::DigestInvalid { .. } => "DIGEST_INVALID".into(),
+            OciRegistryError::ManifestBlobUnknown => "MANIFEST_BLOB_UNKNOWN".into(),
+            OciRegistryError::ManifestInvalid => "MANIFEST_INVALID".into(),
+            OciRegistryError::ManifestUnknown => "MANIFEST_UNKNOWN".into(),
+            OciRegistryError::NameInvalid => "NAME_INVALID".into(),
+            OciRegistryError::NameUnknown => "NAME_UNKNOWN".into(),
+            OciRegistryError::SizeInvalid => "SIZE_INVALID".into(),
+            OciRegistryError::Unauthorized => "UNAUTHORIZED".into(),
+            OciRegistryError::Denied => "DENIED".into(),
+            OciRegistryError::Unsupported => "UNSUPPORTED".into(),
+            OciRegistryError::TooManyRequests => "TOOMANYREQUESTS".into(),
+        }
+    }
+
+    pub fn as_error_message(&self, message: Option<String>, detail: Option<String>) -> ErrorMessage {
+        ErrorMessage { code: self.clone(), message, detail }
+    }
+}
+
 impl Serialize for OciRegistryError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer
     {
-        match self {
-            OciRegistryError::BlobUnknown => serializer.serialize_str("BLOB_UNKNOWN"),
-            OciRegistryError::BlobUploadInvalid => serializer.serialize_str("BLOB_UPLOAD_INVALID"),
-            OciRegistryError::BlobUploadUnknown => serializer.serialize_str("BLOB_UPLOAD_UNKNOWN"),
-            OciRegistryError::DigestInvalid { .. } => serializer.serialize_str("DIGEST_INVALID"),
-            OciRegistryError::ManifestBlobUnknown => serializer.serialize_str("MANIFEST_BLOB_UNKNOWN"),
-            OciRegistryError::ManifestInvalid => serializer.serialize_str("MANIFEST_INVALID"),
-            OciRegistryError::ManifestUnknown => serializer.serialize_str("MANIFEST_UNKNOWN"),
-            OciRegistryError::NameInvalid => serializer.serialize_str("NAME_INVALID"),
-            OciRegistryError::NameUnknown => serializer.serialize_str("NAME_UNKNOWN"),
-            OciRegistryError::SizeInvalid => serializer.serialize_str("SIZE_INVALID"),
-            OciRegistryError::Unauthorized => serializer.serialize_str("UNAUTHORIZED"),
-            OciRegistryError::Denied => serializer.serialize_str("DENIED"),
-            OciRegistryError::Unsupported => serializer.serialize_str("UNSUPPORTED"),
-            OciRegistryError::TooManyRequests => serializer.serialize_str("TOOMANYREQUESTS"),
-        }
+        serializer.serialize_str(&self.as_string())
     }
 }
 
