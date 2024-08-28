@@ -21,7 +21,6 @@ use axum::response::Response;
 use axum::{Router, routing};
 use axum::ServiceExt;
 use axum_server::tls_rustls::RustlsConfig;
-use dto::manifest::{ImageIndex, Manifest};
 use lazy_static::lazy_static;
 use regex::Regex;
 use tokio::fs::File;

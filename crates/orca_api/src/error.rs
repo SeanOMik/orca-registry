@@ -1,8 +1,9 @@
 use axum::{http::StatusCode, response::{IntoResponse, Response}};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::{database::DatabaseError, storage::StorageDriverError};
 
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum OciRegistryError {
     #[error("blob unknown to registry")]

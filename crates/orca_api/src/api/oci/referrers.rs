@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{body::{Body, BoxBody}, extract::{Path, Query, State}, http::{header, StatusCode}, response::{IntoResponse, Response}};
+use axum::{body::Body, extract::{Path, Query, State}, http::{header, StatusCode}, response::Response};
 use tracing::debug;
 
-use crate::{app_state::AppState, dto::manifest::{media_types, Descriptor, ImageIndex, IndexItem, Referrer}, error::AppError};
+use crate::{app_state::AppState, dto::manifest::{media_types, ImageIndex, IndexItem}, error::AppError};
 
 pub async fn list_referrers_get(
     Path((name, digest)): Path<(String, String)>,
