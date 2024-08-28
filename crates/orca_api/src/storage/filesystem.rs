@@ -1,6 +1,6 @@
 use std::{io::ErrorKind, path::Path};
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -13,7 +13,7 @@ use tracing::error;
 
 use crate::{
     byte_stream::ByteStream,
-    dto::manifest::{media_types, Descriptor, ImageIndex, ImageManifest, Manifest, Referrer, ReferrersList},
+    dto::manifest::{media_types, Referrer, ReferrersList},
 };
 
 use super::{StorageDriver, StorageDriverError};
@@ -162,7 +162,7 @@ impl StorageDriver for FilesystemDriver {
     async fn add_referrer(
         &self,
         referred_digest: &str,
-        mut referrer: Referrer,
+        referrer: Referrer,
     ) -> Result<(), StorageDriverError> {
         let path = self.ensure_referrers_path(referred_digest).await?;
         let path = Path::new(&path);
@@ -258,7 +258,6 @@ impl StorageDriver for FilesystemDriver {
         let path = self.get_digest_path(uuid);
         let path = Path::new(&path);
         let parent = path
-            .clone()
             .parent()
             .expect("Failed to get parent path of digest file");
 

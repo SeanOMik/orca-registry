@@ -1,16 +1,14 @@
 use std::sync::Arc;
 
-use axum::body::BoxBody;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
-use tracing::log::warn;
 use tracing::{debug, info};
 
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::digest::Digest;
-use crate::dto::manifest::{Descriptor, Manifest, Referrer};
+use crate::dto::manifest::{Manifest, Referrer};
 use crate::dto::user::UserAuth;
 use crate::dto::RepositoryVisibility;
 use crate::error::{AppError, OciRegistryError};

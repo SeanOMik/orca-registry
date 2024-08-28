@@ -5,6 +5,7 @@ pub mod digest;
 pub mod scope;
 pub mod user;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Tag {
     pub name: String,

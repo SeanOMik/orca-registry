@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use thiserror::Error;
 
-use crate::{byte_stream::ByteStream, dto::manifest::{Descriptor, Referrer}};
+use crate::{byte_stream::ByteStream, dto::manifest::Referrer};
 
 #[derive(Debug, Error)]
 pub enum StorageDriverError {
@@ -16,6 +16,7 @@ pub enum StorageDriverError {
 
 #[async_trait]
 pub trait StorageDriver: Send + Sync {
+    #[allow(dead_code)]
     async fn get_digest(&self, digest: &str) -> Result<Option<Bytes>, StorageDriverError>;
     async fn get_digest_stream(&self, digest: &str) -> Result<Option<ByteStream>, StorageDriverError>;
     async fn digest_length(&self, digest: &str) -> Result<Option<usize>, StorageDriverError>;

@@ -1,8 +1,9 @@
-use std::{collections::HashMap, fmt::Formatter};
+use std::collections::HashMap;
 
-use serde::{de::Expected, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Constants for common media types described in [OCI spec](https://github.com/opencontainers/image-spec/blob/main/media-types.md#oci-image-media-types).
+#[allow(dead_code)]
 pub mod media_types {
     pub const DESCRIPTOR: &'static str = "application/vnd.oci.descriptor.v1+json";
     pub const OCI_LAYOUT: &'static str = "application/vnd.oci.layout.header.v1+json";
@@ -81,39 +82,6 @@ pub struct Platform {
     pub features: Vec<String>,
 }
 
-/* #[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-pub enum IndexItemDescriptor {
-    Manifest(ImageManifest),
-    NestedIndex(ImageIndex),
-}
-
-impl<'de> Deserialize<'de> for IndexItemDescriptor {
-    fn deserialize<D>(deserializer: D) -> Result<IndexItemDescriptor, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let json: serde_json::value::Value = serde_json::value::Value::deserialize(deserializer)?;
-        let media_type = json.get("mediaType")
-            .ok_or(serde::de::Error::missing_field("mediaType"))?;
-        let media_type = media_type.as_str()
-            .unwrap(); // TODO: handle unwrap
-            //.ok_or(serde::de::Error::invalid_type(media_type.into(), "String".to_string()))?;
-        
-        if media_type == media_types::IMAGE_MANIFEST {
-            let manifest = serde_json::from_value(json).unwrap(); // TODO: handle unwrap
-            Ok(IndexItemDescriptor::Manifest(manifest))
-        } else if media_type == media_types::IMAGE_INDEX {
-            let index = serde_json::from_value(json).unwrap(); // TODO: handle unwrap
-            Ok(IndexItemDescriptor::NestedIndex(index))
-        } else {
-            Err(serde::de::Error::invalid_value(serde::de::Unexpected::Str(media_type), 
-                &"a media type of an image manifest or image index"))
-        }
-    }
-} */
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexItem {
@@ -173,13 +141,6 @@ impl std::ops::DerefMut for Referrer {
 }
 
 impl Referrer {
-    pub fn from_descriptor(namespace: &str, desc: Descriptor) -> Self {
-        Self {
-            descriptor: desc,
-            namespace: namespace.into(),
-        }
-    }
-
     pub fn from_image_manifest(namespace: &str, digest: &str, image: &ImageManifest) -> Self {
         let layers_size = image.layers.iter().map(|l| l.size).sum();
         
