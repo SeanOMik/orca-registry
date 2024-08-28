@@ -12,6 +12,7 @@ pub mod catalog;
 pub mod manifests;
 pub mod tags;
 pub mod uploads;
+pub mod referrers;
 
 /// https://docs.docker.com/registry/spec/api/#api-version-check
 /// full endpoint: `/v2/`

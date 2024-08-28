@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS repositories (
 CREATE TABLE IF NOT EXISTS image_manifests (
     digest TEXT NOT NULL PRIMARY KEY,
     repository TEXT NOT NULL,
+    subject_digest TEXT,
     content TEXT NOT NULL
 );
 

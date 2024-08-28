@@ -44,7 +44,7 @@ pub trait Database {
     /// Get a manifest's content.
     async fn get_manifest(&self, repository: &str, digest: &str) -> Result<Option<String>, DatabaseError>;
     /// Save a manifest's content.
-    async fn save_manifest(&self, repository: &str, digest: &str, content: &str) -> Result<(), DatabaseError>;
+    async fn save_manifest(&self, repository: &str, digest: &str, content: &str, subject: Option<&String>) -> Result<(), DatabaseError>;
     /// Delete a manifest
     /// Returns digests that this manifest pointed to.
     async fn delete_manifest(&self, repository: &str, digest: &str) -> Result<Vec<String>, DatabaseError>;
@@ -259,10 +259,11 @@ impl Database for Pool<Sqlite> {
         Ok(Some(row.0))
     }
 
-    async fn save_manifest(&self, repository: &str, digest: &str, manifest: &str) -> Result<(), DatabaseError> {
-        sqlx::query("INSERT INTO image_manifests (digest, repository, content) VALUES (?, ?, ?)")
+    async fn save_manifest(&self, repository: &str, digest: &str, manifest: &str, subject_digest: Option<&String>) -> Result<(), DatabaseError> {
+        sqlx::query("INSERT INTO image_manifests (digest, repository, subject_digest, content) VALUES (?, ?, ?, ?)")
             .bind(digest)
             .bind(repository)
+            .bind(subject_digest)
             .bind(manifest)
             .execute(self).await?;
 

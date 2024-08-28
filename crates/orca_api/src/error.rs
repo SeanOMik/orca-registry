@@ -94,11 +94,6 @@ impl IntoResponse for AppError {
                 ).into_response()
             }
         }
-        /* (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response() */
     }
 }
 
@@ -139,7 +134,9 @@ impl Serialize for OciRegistryError {
 #[derive(Debug, Serialize)]
 pub struct ErrorMessage {
     pub code: OciRegistryError,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
@@ -147,14 +144,3 @@ pub struct ErrorMessage {
 pub struct ErrorsMessage {
     pub errors: Vec<ErrorMessage>,
 }
-
-// This enables using `?` on functions that return `Result<_, anyhow::Error>` to turn them into
-// `Result<_, AppError>`. That way you don't need to do that manually.
-/* impl<E> From<E> for AppError
-where
-    E: Into<anyhow::Error>,
-{
-    fn from(err: E) -> Self {
-        Self(err.into())
-    }
-} */
