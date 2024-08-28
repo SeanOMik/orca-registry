@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::body::BoxBody;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -118,60 +119,18 @@ pub async fn upload_manifest_put(
                 );
             }
 
-            if let Some(subject) = subject_digest {
-                Ok(
-                    (
-                        StatusCode::CREATED,
-                        [
-                            (
-                                HeaderName::from_static("docker-content-digest"),
-                                calculated_digest,
-                            ),
-                            (
-                                header::LOCATION,
-                                format!("/v2/{name}/manifests/{reference}"),
-                            ),
-                            (
-                                HeaderName::from_static("oci-subject"),
-                                subject.clone()
-                            )
-                        ]
-                    ).into_response()
-                )
-            } else {
-                Ok(
-                    (
-                        StatusCode::CREATED,
-                        [
-                            (
-                                HeaderName::from_static("docker-content-digest"),
-                                calculated_digest,
-                            ),
-                            (
-                                header::LOCATION,
-                                format!("/v2/{name}/manifests/{reference}"),
-                            ),
-                        ]
-                    ).into_response()
-                )
-            }
-
-            
-
-            /* let resp = Response::builder()
+            let resp = Response::builder()
                 .status(StatusCode::CREATED)
                 .header(HeaderName::from_static("docker-content-digest"), calculated_digest)
                 .header(header::LOCATION, format!("/v2/{name}/manifests/{reference}"));
 
             let resp = if let Some(subject) = subject_digest {
-                resp.header(HeaderName::from_static("OCI-Subject"), subject)
+                resp.header(HeaderName::from_static("oci-subject"), subject)
             } else { resp };
 
-            Ok(resp.body(BoxBody::default()).unwrap()) */
+            Ok(resp.body(BoxBody::default()).unwrap())
         }
         Manifest::Index(index) => {
-            //warn!("TODO: ManifestList request was received!");
-
             let subject_digest = index.subject.as_ref().map(|s| &s.digest);
 
             // Create the image repository and save the image manifest. This repository will be private by default
@@ -199,43 +158,16 @@ pub async fn upload_manifest_put(
                 storage.add_referrer(&subject, r).await?;
             }
 
-            if let Some(subject) = subject_digest {
-                Ok(
-                    (
-                        StatusCode::CREATED,
-                        [
-                            (
-                                HeaderName::from_static("docker-content-digest"),
-                                calculated_digest,
-                            ),
-                            (
-                                header::LOCATION,
-                                format!("/v2/{name}/manifests/{reference}"),
-                            ),
-                            (
-                                HeaderName::from_static("oci-subject"),
-                                subject.clone()
-                            )
-                        ]
-                    ).into_response()
-                )
-            } else {
-                Ok(
-                    (
-                        StatusCode::CREATED,
-                        [
-                            (
-                                HeaderName::from_static("docker-content-digest"),
-                                calculated_digest,
-                            ),
-                            (
-                                header::LOCATION,
-                                format!("/v2/{name}/manifests/{reference}"),
-                            ),
-                        ]
-                    ).into_response()
-                )
-            }
+            let resp = Response::builder()
+                .status(StatusCode::CREATED)
+                .header(HeaderName::from_static("docker-content-digest"), calculated_digest)
+                .header(header::LOCATION, format!("/v2/{name}/manifests/{reference}"));
+
+            let resp = if let Some(subject) = subject_digest {
+                resp.header(HeaderName::from_static("oci-subject"), subject)
+            } else { resp };
+
+            Ok(resp.body(BoxBody::default()).unwrap())
         }
     }
 }
