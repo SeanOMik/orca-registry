@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::body::BoxBody;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -9,7 +10,7 @@ use tracing::{debug, info};
 use crate::app_state::AppState;
 use crate::database::Database;
 use crate::dto::digest::Digest;
-use crate::dto::manifest::Manifest;
+use crate::dto::manifest::{Descriptor, Manifest, Referrer};
 use crate::dto::user::UserAuth;
 use crate::dto::RepositoryVisibility;
 use crate::error::{AppError, OciRegistryError};
@@ -33,6 +34,8 @@ pub async fn upload_manifest_put(
     let user = auth.user.unwrap();
 
     let database = &state.database;
+
+    debug!("Manifest is here: {body}");
 
     // if the manifest already exists, respond now and don't try to make it again.
     if database
@@ -58,25 +61,38 @@ pub async fn upload_manifest_put(
             .into_response());
     }
 
-    // Create the image repository and save the image manifest. This repository will be private by default
-    database
-        .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
-        .await?;
-    database
-        .save_manifest(&name, &calculated_digest, &body)
-        .await?;
+    let manifest = serde_json::from_str(&body)
+        .map_err(|_| OciRegistryError::ManifestInvalid)?;
 
-    // If the reference is not a digest, then it must be a tag name.
-    if !Digest::is_digest(&reference) {
-        database
-            .save_tag(&name, &reference, &calculated_digest)
-            .await?;
-    }
-
-    info!("Saved manifest {}", calculated_digest);
-
-    match serde_json::from_str(&body).map_err(|_| OciRegistryError::ManifestInvalid)? {
+    match manifest {
         Manifest::Image(image) => {
+            let subject_digest = image.subject.as_ref().map(|s| &s.digest);
+
+            // Create the image repository and save the image manifest. This repository will be private by default
+            database
+                .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
+                .await?;
+            database
+                .save_manifest(&name, &calculated_digest, &body, subject_digest)
+                .await?;
+
+            info!("Saved manifest {}", calculated_digest);
+
+            // If the reference is not a digest, then it must be a tag name.
+            if !Digest::is_digest(&reference) {
+                database
+                    .save_tag(&name, &reference, &calculated_digest)
+                    .await?;
+            }
+
+            if let Some(subject) = subject_digest {
+                debug!("Manifest has a subject, adding this manifest as a referrer to '{}'", subject);
+
+                let storage = state.storage.lock().await;
+                let r = Referrer::from_image_manifest(&name, &calculated_digest, &image);
+                storage.add_referrer(&subject, r).await?;
+            }
+
             // Link the manifest to the image layer
             debug!(
                 "Linking manifest {} to layer {}",
@@ -104,25 +120,124 @@ pub async fn upload_manifest_put(
                 );
             }
 
-            Ok((
-                StatusCode::CREATED,
-                [
+            if let Some(subject) = subject_digest {
+                Ok(
                     (
-                        HeaderName::from_static("docker-content-digest"),
-                        calculated_digest,
-                    ),
+                        StatusCode::CREATED,
+                        [
+                            (
+                                HeaderName::from_static("docker-content-digest"),
+                                calculated_digest,
+                            ),
+                            (
+                                header::LOCATION,
+                                format!("/v2/{name}/manifests/{reference}"),
+                            ),
+                            (
+                                HeaderName::from_static("oci-subject"),
+                                subject.clone()
+                            )
+                        ]
+                    ).into_response()
+                )
+            } else {
+                Ok(
                     (
-                        header::LOCATION,
-                        format!("/v2/{name}/manifests/{reference}"),
-                    ),
-                ],
-            )
-                .into_response())
-        }
-        Manifest::List(_list) => {
-            warn!("TODO: ManifestList request was received!");
+                        StatusCode::CREATED,
+                        [
+                            (
+                                HeaderName::from_static("docker-content-digest"),
+                                calculated_digest,
+                            ),
+                            (
+                                header::LOCATION,
+                                format!("/v2/{name}/manifests/{reference}"),
+                            ),
+                        ]
+                    ).into_response()
+                )
+            }
 
-            Ok(StatusCode::NOT_IMPLEMENTED.into_response())
+            
+
+            /* let resp = Response::builder()
+                .status(StatusCode::CREATED)
+                .header(HeaderName::from_static("docker-content-digest"), calculated_digest)
+                .header(header::LOCATION, format!("/v2/{name}/manifests/{reference}"));
+
+            let resp = if let Some(subject) = subject_digest {
+                resp.header(HeaderName::from_static("OCI-Subject"), subject)
+            } else { resp };
+
+            Ok(resp.body(BoxBody::default()).unwrap()) */
+        }
+        Manifest::Index(index) => {
+            //warn!("TODO: ManifestList request was received!");
+
+            let subject_digest = index.subject.as_ref().map(|s| &s.digest);
+
+            // Create the image repository and save the image manifest. This repository will be private by default
+            database
+                .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
+                .await?;
+            database
+                .save_manifest(&name, &calculated_digest, &body, subject_digest)
+                .await?;
+
+            info!("Saved index manifest {}", calculated_digest);
+
+            // If the reference is not a digest, then it must be a tag name.
+            if !Digest::is_digest(&reference) {
+                database
+                    .save_tag(&name, &reference, &calculated_digest)
+                    .await?;
+            }
+
+            if let Some(subject) = subject_digest {
+                debug!("Manifest has a subject, adding this manifest as a referrer to '{}'", subject);
+
+                let storage = state.storage.lock().await;
+                let r = Referrer::from_index_manifest(&name, &calculated_digest, &index);
+                storage.add_referrer(&subject, r).await?;
+            }
+
+            if let Some(subject) = subject_digest {
+                Ok(
+                    (
+                        StatusCode::CREATED,
+                        [
+                            (
+                                HeaderName::from_static("docker-content-digest"),
+                                calculated_digest,
+                            ),
+                            (
+                                header::LOCATION,
+                                format!("/v2/{name}/manifests/{reference}"),
+                            ),
+                            (
+                                HeaderName::from_static("oci-subject"),
+                                subject.clone()
+                            )
+                        ]
+                    ).into_response()
+                )
+            } else {
+                Ok(
+                    (
+                        StatusCode::CREATED,
+                        [
+                            (
+                                HeaderName::from_static("docker-content-digest"),
+                                calculated_digest,
+                            ),
+                            (
+                                header::LOCATION,
+                                format!("/v2/{name}/manifests/{reference}"),
+                            ),
+                        ]
+                    ).into_response()
+                )
+            }
         }
     }
 }

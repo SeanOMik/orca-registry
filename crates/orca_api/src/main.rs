@@ -21,6 +21,7 @@ use axum::response::Response;
 use axum::{Router, routing};
 use axum::ServiceExt;
 use axum_server::tls_rustls::RustlsConfig;
+use dto::manifest::{ImageIndex, Manifest};
 use lazy_static::lazy_static;
 use regex::Regex;
 use tokio::fs::File;
@@ -220,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
         .nest("/v2", Router::new()
             .route("/", routing::get(api::oci::version_check))
             .route("/_catalog", routing::get(api::oci::catalog::list_repositories))
+            .route("/:name/referrers/:digest", routing::get(api::oci::referrers::list_referrers_get))
             .route("/:name/tags/list", routing::get(api::oci::tags::list_tags))
             .nest("/:name/blobs", Router::new()
                 .route("/:digest", routing::get(api::oci::blobs::pull_digest_get)
