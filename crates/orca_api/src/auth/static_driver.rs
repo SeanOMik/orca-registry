@@ -1,15 +1,16 @@
-use std::{path::Path, collections::HashMap, error::Error};
+use std::{path::Path, collections::HashMap};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use serde::{de::{Visitor, MapAccess}, Deserialize, Deserializer};
 use toml::Table;
-use tracing::{info, debug};
+use tracing::info;
 
-use crate::dto::{scope::Action, user::{Permission, RepositoryPermissions}, RepositoryVisibility};
+use crate::dto::{user::Permission, RepositoryVisibility};
 
 use super::AuthDriver;
 
+#[derive(Debug, Clone)]
 enum PermissionMatch {
     Account(String),
     Repository(String)
