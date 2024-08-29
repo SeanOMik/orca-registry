@@ -115,6 +115,11 @@ pub struct Config {
     pub listen_address: String,
     pub listen_port: String,
     url: Option<String>,
+    /// Max age of a token, in seconds, before it expires.
+    /// 
+    /// Defaults to 4hr (14400 seconds).
+    #[serde(default = "default_token_max_age")]
+    pub token_max_age: u64,
     #[serde(default)]
     pub limits: LimitConfig,
     pub log: LogConfig,
@@ -175,6 +180,10 @@ fn default_log_level() -> Level {
 
 fn default_log_path() -> String {
     "orca.log".to_string()
+}
+
+fn default_token_max_age() -> u64 {
+    14400
 }
 
 fn serialize_log_level<'de, D>(deserializer: D) -> Result<Level, D::Error>

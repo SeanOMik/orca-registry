@@ -7,7 +7,7 @@ use axum::{
     Form,
 };
 use axum_auth::AuthBasic;
-use chrono::{DateTime, Days, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, span, Level};
 
@@ -60,20 +60,19 @@ pub struct AuthResponse {
     issued_at: String,
 }
 
-fn create_jwt_token(
-    jwt_key: String,
+pub fn create_jwt_token(
+    jwt_key: &str,
+    max_age_secs: u64,
     account: Option<&str>,
     scopes: Vec<Scope>,
 ) -> anyhow::Result<TokenInfo> {
     let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_key.as_bytes())?;
 
     let now = chrono::offset::Utc::now();
-
-    // Expire the token in a day
-    let expiration = now.checked_add_days(Days::new(1)).unwrap();
+    let expiration = now + chrono::Duration::seconds(max_age_secs as _);
 
     let mut rng = rand::thread_rng();
-    let jwtid = format!("{}", rng.gen::<u64>());
+    let jwtid = rng.gen::<u64>().to_string();
 
     // empty account if they are not authenticated
     let account = account.map(|a| a.to_string()).unwrap_or(String::new());
@@ -81,7 +80,7 @@ fn create_jwt_token(
     // Construct the claims for the token
     // TODO: Verify the token!
     let token = AuthToken::new(
-        String::from("orca-registry__DEV"),
+        String::from("orca-registry"),
         account,
         String::from("reg"),
         expiration,
@@ -204,7 +203,7 @@ pub async fn auth_basic_get(
             }
 
             let token =
-                create_jwt_token(state.config.jwt_key.clone(), None, auth.scope).map_err(|_| {
+                create_jwt_token(&state.config.jwt_key, state.config.token_max_age, None, auth.scope).map_err(|_| {
                     error!("Failed to create jwt token!");
 
                     StatusCode::INTERNAL_SERVER_ERROR
@@ -331,7 +330,7 @@ pub async fn auth_basic_get(
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token = create_jwt_token(state.config.jwt_key.clone(), Some(&account), vec![])
+        let token = create_jwt_token(&state.config.jwt_key, state.config.token_max_age, Some(&account), vec![])
             .map_err(|_| {
                 error!("Failed to create jwt token!");
 

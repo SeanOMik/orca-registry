@@ -241,6 +241,9 @@ async fn main() -> anyhow::Result<()> {
                 .delete(api::oci::manifests::delete_manifest))
             .layer(auth_middleware) // require auth for ALL v2 routes
         )
+        .nest("/orca", Router::new()
+            .route("/login", routing::post(api::orca::login_post))
+        )
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
