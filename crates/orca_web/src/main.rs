@@ -1,4 +1,5 @@
 use leptos::{component, create_signal, view, CollectView, IntoView, ReadSignal, Signal, SignalUpdate};
+use thaw::{Button, ButtonVariant};
 
 #[component]
 fn ProgressBar(
@@ -30,11 +31,11 @@ fn App() -> impl IntoView {
         .map(|(count, set_count)| {
             view! {
                 <li>
-                    <button
+                    <Button variant=ButtonVariant::Primary
                         on:click=move |_| set_count.update(|n| *n += 1)
                     >
                         {count}
-                    </button>
+                    </Button>
                 </li>
             }
         })
