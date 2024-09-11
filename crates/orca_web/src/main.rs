@@ -1,51 +1,33 @@
-use leptos::{component, create_signal, view, CollectView, IntoView, ReadSignal, Signal, SignalUpdate};
-use thaw::{Button, ButtonVariant};
+use leptos::{component, view, IntoView};
 
-#[component]
-fn ProgressBar(
-    #[prop(default = 100)]
-    max: u16,
-    // this isn't a ReadSignal<i32> so that `double_count` can also be accepted.
-    //progress: impl Fn() -> i32 + 'static,
-    #[prop(into)]
-    progress: Signal<i32>
-) -> impl IntoView {
-    view! {
-        <progress
-            max=max
-            value=progress
-        />
-        <br/>
-    }
-}
+use leptos_router::{Router, Route, Routes};
+
+use tracing_subscriber::fmt;
+use tracing_subscriber_wasm::MakeConsoleWriter;
+
+mod pages;
 
 #[component]
 fn App() -> impl IntoView {
-    // create a list of 5 signals
-    let length = 5;
-    let counters = (1..=length).map(|idx| create_signal(idx));
-
-    // each item manages a reactive view
-    // but the list itself will never change
-    let counter_buttons = counters
-        .map(|(count, set_count)| {
-            view! {
-                <li>
-                    <Button variant=ButtonVariant::Primary
-                        on:click=move |_| set_count.update(|n| *n += 1)
-                    >
-                        {count}
-                    </Button>
-                </li>
-            }
-        })
-        .collect_view();
-
     view! {
-        <ul>{counter_buttons}</ul>
+        <Router>
+            <Routes>
+                <Route path="/login" view=pages::Login />
+                <Route path="/*any" view=|| view! { <p>"404 Not Found"</p> }/>
+            </Routes>
+        </Router>
     }
 }
 
 fn main() {
+    fmt()
+        .with_writer(
+            MakeConsoleWriter::default()
+                .map_trace_level_to(tracing::Level::DEBUG),
+        )
+        .without_time()
+        .init();
+    //console_error_panic_hook::set_once();
+
     leptos::mount_to_body(|| view! { <App/> })
 }
