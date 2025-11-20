@@ -235,11 +235,9 @@ async fn main() -> anyhow::Result<()> {
                         .put(api::oci::uploads::finish_chunked_upload_put)
                         .delete(api::oci::uploads::cancel_upload_delete)
                         .get(api::oci::uploads::check_upload_status_get)
-                        
                     )
                     .layer(DefaultBodyLimit::disable())
                     .layer(RequestBodyLimitLayer::new(config.limits.body_limit))
-                    
                 )
             )
             .route("/:name/manifests/:reference", routing::get(api::oci::manifests::pull_manifest_get)

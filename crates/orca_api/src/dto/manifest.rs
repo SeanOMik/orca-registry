@@ -16,20 +16,13 @@ pub mod media_types {
     pub const OCI_EMPTY: &'static str = "application/vnd.oci.empty.v1+json";
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/* #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContainerConfig {
     pub media_type: String,
     pub size: Option<u32>,
     pub digest: String
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ManifestType {
-    MediaType(String),
-    ArtifactType(String),
-}
+} */
 
 /// Describes the disposition of the targeted content.
 /// https://github.com/opencontainers/image-spec/blob/main/descriptor.md
@@ -51,7 +44,7 @@ pub struct Descriptor {
     pub platform: Option<Platform>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageManifest {
     pub schema_version: u32,
@@ -59,12 +52,50 @@ pub struct ImageManifest {
     pub media_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_type: Option<String>,
-    pub config: ContainerConfig,
+    pub config: Descriptor,
     pub layers: Vec<Descriptor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<Descriptor>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub annotations: HashMap<String, String>,
+}
+
+impl<'de> Deserialize<'de> for ImageManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Create a Raw struct so that I can do cross field validation for the struct
+        // I'm implementing Deserialize with.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct Raw {
+            pub schema_version: u32,
+            pub media_type: Option<String>,
+            pub artifact_type: Option<String>,
+            pub config: Descriptor,
+            pub layers: Vec<Descriptor>,
+            pub subject: Option<Descriptor>,
+            pub annotations: HashMap<String, String>,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+
+        // artifactType MUST be set when config.mediaType is NOT set
+        if raw.artifact_type.is_none() && raw.config.media_type.is_empty() {
+            return Err(serde::de::Error::custom("artifactType MUST be set when config.mediaType is NOT set"));
+        }
+
+        Ok(Self {
+            schema_version: raw.schema_version,
+            media_type: raw.media_type,
+            artifact_type: raw.artifact_type,
+            config: raw.config,
+            layers: raw.layers,
+            subject: raw.subject,
+            annotations: raw.annotations,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,7 +129,7 @@ pub struct ImageIndex {
     pub media_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // This field must always be present, even when the array is empty.
     pub manifests: Vec<IndexItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<Descriptor>,

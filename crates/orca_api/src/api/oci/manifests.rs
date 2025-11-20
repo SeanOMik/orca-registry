@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::body::BoxBody;
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderName, StatusCode};
+use axum::http::{HeaderMap, HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use tracing::{debug, info};
 
@@ -18,6 +18,7 @@ pub async fn upload_manifest_put(
     Path((name, reference)): Path<(String, String)>,
     state: State<Arc<AppState>>,
     auth: UserAuth,
+    headers: HeaderMap,
     body: String,
 ) -> Result<Response, AppError> {
     // enforce manifest size limit
@@ -65,12 +66,26 @@ pub async fn upload_manifest_put(
         Manifest::Image(image) => {
             let subject_digest = image.subject.as_ref().map(|s| &s.digest);
 
+            let media_type = match &image.media_type {
+                Some(mt) => mt,
+                None => {
+                    let ct = headers.get(header::CONTENT_TYPE)
+                        .ok_or(AppError::BadRequest)?
+                        .to_str()
+                        .map_err(|e| {
+                            debug!("Failed to get Content-Type header as string: {e}");
+                            AppError::BadRequest
+                        })?;
+                    ct
+                }
+            };
+
             // Create the image repository and save the image manifest. This repository will be private by default
             database
                 .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
                 .await?;
             database
-                .save_manifest(&name, &calculated_digest, &body, subject_digest)
+                .save_manifest(&name, &calculated_digest, &body, subject_digest, media_type)
                 .await?;
 
             info!("Saved manifest {}", calculated_digest);
@@ -136,7 +151,7 @@ pub async fn upload_manifest_put(
                 .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
                 .await?;
             database
-                .save_manifest(&name, &calculated_digest, &body, subject_digest)
+                .save_manifest(&name, &calculated_digest, &body, subject_digest, &index.media_type)
                 .await?;
 
             info!("Saved index manifest {}", calculated_digest);
@@ -190,14 +205,12 @@ pub async fn pull_manifest_get(
         }
     };
 
-    let manifest_content = database.get_manifest(&name, &digest).await?;
-    if manifest_content.is_none() {
+    let manifest = database.get_manifest(&name, &digest).await?;
+    if manifest.is_none() {
         info!("Unknown manifest in repo {} for digest {}", name, digest);
         return Err(OciRegistryError::ManifestUnknown.into());
     }
-    let manifest_content = manifest_content.unwrap();
-
-    debug!("Pulled manifest: {}", manifest_content);
+    let manifest = manifest.unwrap();
 
     Ok((
         StatusCode::OK,
@@ -205,19 +218,15 @@ pub async fn pull_manifest_get(
             (HeaderName::from_static("docker-content-digest"), digest),
             (
                 header::CONTENT_TYPE,
-                "application/vnd.docker.distribution.manifest.v2+json".to_string(),
+                manifest.content_type,
             ),
-            (header::CONTENT_LENGTH, manifest_content.len().to_string()),
-            (
-                header::ACCEPT,
-                "application/vnd.docker.distribution.manifest.v2+json".to_string(),
-            ),
+            (header::CONTENT_LENGTH, manifest.content.len().to_string()),
             (
                 HeaderName::from_static("docker-distribution-api-version"),
                 "registry/2.0".to_string(),
             ),
         ],
-        manifest_content,
+        manifest.content,
     )
         .into_response())
 }
@@ -241,15 +250,13 @@ pub async fn manifest_exists_head(
     };
     debug!("found digest: {}", digest);
 
-    let manifest_content = database.get_manifest(&name, &digest).await?;
-    if manifest_content.is_none() {
+    let manifest = database.get_manifest(&name, &digest).await?;
+    if manifest.is_none() {
         // The digest that was provided in the request was invalid.
         // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let manifest_content = manifest_content.unwrap();
-
-    debug!("got content");
+    let manifest = manifest.unwrap();
 
     Ok((
         StatusCode::OK,
@@ -257,15 +264,15 @@ pub async fn manifest_exists_head(
             (HeaderName::from_static("docker-content-digest"), digest),
             (
                 header::CONTENT_TYPE,
-                "application/vnd.docker.distribution.manifest.v2+json".to_string(),
+                manifest.content_type,
             ),
-            (header::CONTENT_LENGTH, manifest_content.len().to_string()),
+            (header::CONTENT_LENGTH, manifest.content.len().to_string()),
             (
                 HeaderName::from_static("docker-distribution-api-version"),
                 "registry/2.0".to_string(),
             ),
         ],
-        manifest_content,
+        manifest.content,
     )
         .into_response())
 }
