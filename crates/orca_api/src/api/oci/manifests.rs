@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use axum::body::BoxBody;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderName, StatusCode, header};
+use axum::http::{HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::app_state::AppState;
 use crate::database::Database;
@@ -18,7 +18,6 @@ pub async fn upload_manifest_put(
     Path((name, reference)): Path<(String, String)>,
     state: State<Arc<AppState>>,
     auth: UserAuth,
-    headers: HeaderMap,
     body: String,
 ) -> Result<Response, AppError> {
     // enforce manifest size limit
@@ -60,32 +59,21 @@ pub async fn upload_manifest_put(
     }
 
     let manifest = serde_json::from_str(&body)
-        .map_err(|_| OciRegistryError::ManifestInvalid)?;
+        .map_err(|e| {
+            debug!("Manifest deserialize error: {e}");
+            OciRegistryError::ManifestInvalid
+        })?;
 
     match manifest {
         Manifest::Image(image) => {
             let subject_digest = image.subject.as_ref().map(|s| &s.digest);
-
-            let media_type = match &image.media_type {
-                Some(mt) => mt,
-                None => {
-                    let ct = headers.get(header::CONTENT_TYPE)
-                        .ok_or(AppError::BadRequest)?
-                        .to_str()
-                        .map_err(|e| {
-                            debug!("Failed to get Content-Type header as string: {e}");
-                            AppError::BadRequest
-                        })?;
-                    ct
-                }
-            };
 
             // Create the image repository and save the image manifest. This repository will be private by default
             database
                 .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
                 .await?;
             database
-                .save_manifest(&name, &calculated_digest, &body, subject_digest, media_type)
+                .save_manifest(&name, &calculated_digest, &body, subject_digest)
                 .await?;
 
             info!("Saved manifest {}", calculated_digest);
@@ -151,7 +139,7 @@ pub async fn upload_manifest_put(
                 .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
                 .await?;
             database
-                .save_manifest(&name, &calculated_digest, &body, subject_digest, &index.media_type)
+                .save_manifest(&name, &calculated_digest, &body, subject_digest)
                 .await?;
 
             info!("Saved index manifest {}", calculated_digest);
@@ -212,21 +200,31 @@ pub async fn pull_manifest_get(
     }
     let manifest = manifest.unwrap();
 
+    // Find the content type from the manifest
+    let content_type = {
+        let m = serde_json::from_str::<Manifest>(&manifest)
+            .map_err(|e| {
+                error!("Failed to serialize manifest retrieved from database: {e}");
+                AppError::Internal
+            })?;
+        m.content_type()
+    };
+
     Ok((
         StatusCode::OK,
         [
             (HeaderName::from_static("docker-content-digest"), digest),
             (
                 header::CONTENT_TYPE,
-                manifest.content_type,
+                content_type,
             ),
-            (header::CONTENT_LENGTH, manifest.content.len().to_string()),
+            (header::CONTENT_LENGTH, manifest.len().to_string()),
             (
                 HeaderName::from_static("docker-distribution-api-version"),
                 "registry/2.0".to_string(),
             ),
         ],
-        manifest.content,
+        manifest,
     )
         .into_response())
 }
@@ -258,21 +256,31 @@ pub async fn manifest_exists_head(
     }
     let manifest = manifest.unwrap();
 
+    // Find the content type from the manifest
+    let content_type = {
+        let m = serde_json::from_str::<Manifest>(&manifest)
+            .map_err(|e| {
+                error!("Failed to serialize manifest retrieved from database: {e}");
+                AppError::Internal
+            })?;
+        m.content_type()
+    };
+
     Ok((
         StatusCode::OK,
         [
             (HeaderName::from_static("docker-content-digest"), digest),
             (
                 header::CONTENT_TYPE,
-                manifest.content_type,
+                content_type,
             ),
-            (header::CONTENT_LENGTH, manifest.content.len().to_string()),
+            (header::CONTENT_LENGTH, manifest.len().to_string()),
             (
                 HeaderName::from_static("docker-distribution-api-version"),
                 "registry/2.0".to_string(),
             ),
         ],
-        manifest.content,
+        manifest,
     )
         .into_response())
 }

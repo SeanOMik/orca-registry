@@ -50,6 +50,8 @@ pub enum AppError {
     Database(#[from] DatabaseError),
     #[error("Bad client request")]
     BadRequest,
+    #[error("Internal error")]
+    Internal,
     #[error("{0}")]
     Other(anyhow::Error),
 }
@@ -87,6 +89,9 @@ impl IntoResponse for AppError {
             //AppError::Database(e) => todo!(),
             AppError::BadRequest => {
                 StatusCode::BAD_REQUEST.into_response()
+            },
+            AppError::Internal => {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             },
             _ => {
                 (
@@ -139,9 +144,4 @@ pub struct ErrorMessage {
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ErrorsMessage {
-    pub errors: Vec<ErrorMessage>,
 }

@@ -23,8 +23,7 @@ CREATE TABLE IF NOT EXISTS image_manifests (
     digest TEXT NOT NULL PRIMARY KEY,
     repository TEXT NOT NULL,
     subject_digest TEXT,
-    content TEXT NOT NULL,
-    content_type VARCHAR(256) NOT NULL
+    content TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS image_tags (

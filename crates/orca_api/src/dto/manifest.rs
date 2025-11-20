@@ -16,14 +16,6 @@ pub mod media_types {
     pub const OCI_EMPTY: &'static str = "application/vnd.oci.empty.v1+json";
 }
 
-/* #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContainerConfig {
-    pub media_type: String,
-    pub size: Option<u32>,
-    pub digest: String
-} */
-
 /// Describes the disposition of the targeted content.
 /// https://github.com/opencontainers/image-spec/blob/main/descriptor.md
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +68,7 @@ impl<'de> Deserialize<'de> for ImageManifest {
             pub config: Descriptor,
             pub layers: Vec<Descriptor>,
             pub subject: Option<Descriptor>,
+            #[serde(default)]
             pub annotations: HashMap<String, String>,
         }
 
@@ -143,6 +136,27 @@ pub enum Manifest {
     Image(ImageManifest),
     /// Multiple manifests
     Index(ImageIndex)
+}
+
+impl Manifest {
+    pub fn content_type(&self) -> String {
+        match self {
+            Manifest::Image(man) => {
+                if let Some(ct) = &man.media_type {
+                    ct.clone()
+                } else {
+                    media_types::IMAGE_MANIFEST.to_string()
+                }
+            },
+            Manifest::Index(ind) => {
+                if ind.media_type.is_empty() {
+                    media_types::IMAGE_INDEX.to_string()
+                } else {
+                    ind.media_type.clone()
+                }
+            },
+        }
+    }
 }
 
 /// A referrer.

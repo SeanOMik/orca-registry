@@ -18,13 +18,6 @@ pub enum DatabaseError {
     Internal(#[from] anyhow::Error),
 }
 
-/// A raw OCI manifest retrieved from the database.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DatabaseManifest {
-    pub content: String,
-    pub content_type: String,
-}
-
 #[async_trait]
 pub trait Database {
     // Digest related functions
@@ -49,9 +42,9 @@ pub trait Database {
     // Manifest related functions
 
     /// Get a manifest's content.
-    async fn get_manifest(&self, repository: &str, digest: &str) -> Result<Option<DatabaseManifest>, DatabaseError>;
+    async fn get_manifest(&self, repository: &str, digest: &str) -> Result<Option<String>, DatabaseError>;
     /// Save a manifest's content.
-    async fn save_manifest(&self, repository: &str, digest: &str, content: &str, subject: Option<&String>, content_type: &str) -> Result<(), DatabaseError>;
+    async fn save_manifest(&self, repository: &str, digest: &str, content: &str, subject: Option<&String>) -> Result<(), DatabaseError>;
     /// Delete a manifest
     /// Returns digests that this manifest pointed to.
     async fn delete_manifest(&self, repository: &str, digest: &str) -> Result<Vec<String>, DatabaseError>;
@@ -247,22 +240,21 @@ impl Database for Pool<Sqlite> {
         Ok(())
     }
 
-    async fn get_manifest(&self, repository: &str, digest: &str) -> Result<Option<DatabaseManifest>, DatabaseError> {
-        let row: Option<(String, String)> = sqlx::query_as("SELECT content, content_type FROM image_manifests where digest = ? AND repository = ?")
+    async fn get_manifest(&self, repository: &str, digest: &str) -> Result<Option<String>, DatabaseError> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT content FROM image_manifests where digest = ? AND repository = ?")
             .bind(digest)
             .bind(repository)
             .fetch_optional(self).await?;
 
-        Ok(row.map(|(c, ct)| DatabaseManifest { content: c, content_type: ct }))
+        Ok(row.map(|(c,)| c))
     }
 
-    async fn save_manifest(&self, repository: &str, digest: &str, manifest: &str, subject_digest: Option<&String>, content_type: &str) -> Result<(), DatabaseError> {
-        sqlx::query("INSERT INTO image_manifests (digest, repository, subject_digest, content, content_type) VALUES (?, ?, ?, ?, ?)")
+    async fn save_manifest(&self, repository: &str, digest: &str, manifest: &str, subject_digest: Option<&String>) -> Result<(), DatabaseError> {
+        sqlx::query("INSERT INTO image_manifests (digest, repository, subject_digest, content) VALUES (?, ?, ?, ?)")
             .bind(digest)
             .bind(repository)
             .bind(subject_digest)
             .bind(manifest)
-            .bind(content_type)
             .execute(self).await?;
 
         Ok(())
