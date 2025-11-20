@@ -1,7 +1,7 @@
 [package]
 name = "orca-api"
 version = "0.1.1"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -37,7 +37,7 @@ axum = "0.6.18"
 axum-server = { version = "0.5.1", features = [ "tls-rustls" ] }
 axum-macros = "0.3.7"
 
-tower-http = { version = "0.4.0", features = [ "trace", "normalize-path" ] }
+tower-http = { version = "0.4.0", features = [ "trace", "normalize-path", "limit" ] }
 tower-layer = { version = "0.3.2" }
 
 figment = { version = "0.10", features = ["toml", "env"] }

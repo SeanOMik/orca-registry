@@ -3,9 +3,21 @@ listen_port = "3000"
 ## The full path of the registry
 url = "http://localhost:3000/"
 
-#[limits]
+## The number of seconds it takes for a token to expire before a client must re-authenticate.
+## Applies for sessions in the webui as well.
+##
+## Set to 0 for tokens that never expire. UNSAFE
+# token_max_age = 14400 # 4hr
+
+[limits]
 ## Manifest limit size in bytes
-#manifest_limit = 10000000 # 10Mb
+# manifest_limit = 10_000_000 # 10 MB
+## The limit of the request body.
+##
+## Depending on the tool (if it doesn't use chunked uploaded), this may limit
+## the size of the images uploaded.
+## Oras does not use chunked uploading: https://github.com/oras-project/oras-go/issues/338
+# body_limit = 1_000_000_000 # 1 GB
 
 [log]
 ## The minimum level of logs (ignored if 'env_filter' is specified)

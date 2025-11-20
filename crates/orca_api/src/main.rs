@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use auth::{AuthDriver, ldap_driver::LdapAuthDriver};
+use axum::extract::DefaultBodyLimit;
 use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -24,6 +25,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use tokio::fs::File;
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_layer::Layer;
 
 use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
@@ -209,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
     let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
 
     let tls_config = config.tls.clone();
-    let state = Arc::new(AppState::new(pool, storage_driver, config, auth_driver));
+    let state = Arc::new(AppState::new(pool, storage_driver, config.clone(), auth_driver));
    
     let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::check_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
@@ -228,11 +230,16 @@ async fn main() -> anyhow::Result<()> {
                     .delete(api::oci::blobs::delete_digest))
                 .nest("/uploads", Router::new()
                     .route("/", routing::post(api::oci::uploads::start_upload_post))
-                    .route("/:uuid", routing::patch(api::oci::uploads::chunked_upload_layer_patch)
+                    .route("/:uuid", 
+                        routing::patch(api::oci::uploads::chunked_upload_layer_patch)
                         .put(api::oci::uploads::finish_chunked_upload_put)
                         .delete(api::oci::uploads::cancel_upload_delete)
                         .get(api::oci::uploads::check_upload_status_get)
+                        
                     )
+                    .layer(DefaultBodyLimit::disable())
+                    .layer(RequestBodyLimitLayer::new(config.limits.body_limit))
+                    
                 )
             )
             .route("/:name/manifests/:reference", routing::get(api::oci::manifests::pull_manifest_get)

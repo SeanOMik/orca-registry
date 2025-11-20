@@ -3,3 +3,4 @@ members = [
     "crates/orca_api",
     "crates/orca_web"
 ]
+resolver = "3"

@@ -48,17 +48,36 @@ pub struct SqliteDbConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct LimitConfig {
-    /// Limit of manifest in bytes
+    /// Limit of manifest in bytes.
+    #[serde(default = "default_manifest_limit")]
     pub manifest_limit: usize,
+
+    /// The limit of the request body.
+    /// 
+    /// Depending on the tool (if it doesn't use chunked uploaded), this may limit
+    /// the size of the images uploaded.
+    /// Oras does not use chunked uploading: https://github.com/oras-project/oras-go/issues/338
+    #[serde(default = "default_body_limit")]
+    pub body_limit: usize,
 }
 
 impl Default for LimitConfig {
     fn default() -> Self {
         Self {
-            // 4Mb in bytes
-            manifest_limit: 4000000
+            manifest_limit: default_manifest_limit(),
+            body_limit: default_body_limit(),
         }
     }
+}
+
+#[inline(always)]
+fn default_manifest_limit() -> usize {
+    10_000_000 // 10 MB
+}
+
+#[inline(always)]
+fn default_body_limit() -> usize {
+    1_000_000_000 // 1 GB
 }
 
 #[derive(Deserialize, Clone)]
@@ -200,10 +219,3 @@ where D: Deserializer<'de> {
         _ => Err(serde::de::Error::custom(format!("Unknown log level: '{}'", s))),
     }
 }
-
-/* fn<'de, D> serialize_log_level(D) -> Result<Level, D::Error>
-where D: Deserializer<'de>
-{
-
-} */
-//fn serialize_log_level() -> Level

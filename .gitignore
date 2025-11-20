@@ -1,6 +1,6 @@
 /target
 .env
 .vscode
-/registry
+registry
 config.toml
 Dockerfile

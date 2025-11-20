@@ -22,6 +22,7 @@ pub async fn upload_manifest_put(
 ) -> Result<Response, AppError> {
     // enforce manifest size limit
     if body.len() > state.config.limits.manifest_limit {
+        debug!("Rejecting manifest since its is larger than the limit: {} > {}", body.len(), state.config.limits.manifest_limit);
         return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
     }
 
@@ -31,10 +32,7 @@ pub async fn upload_manifest_put(
 
     // anonymous users wouldn't be able to get to this point, so it should be safe to unwrap.
     let user = auth.user.unwrap();
-
     let database = &state.database;
-
-    debug!("Manifest is here: {body}");
 
     // if the manifest already exists, respond now and don't try to make it again.
     if database

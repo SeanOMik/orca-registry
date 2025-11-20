@@ -72,7 +72,7 @@ pub fn create_jwt_token(
     let expiration = now + chrono::Duration::seconds(max_age_secs as _);
 
     let mut rng = rand::thread_rng();
-    let jwtid = rng.gen::<u64>().to_string();
+    let jwtid = rng.r#gen::<u64>().to_string();
 
     // empty account if they are not authenticated
     let account = account.map(|a| a.to_string()).unwrap_or(String::new());
