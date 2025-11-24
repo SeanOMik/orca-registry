@@ -1,34 +1,35 @@
 mod api;
 mod app_state;
-mod database;
-mod dto;
-mod storage;
+mod auth;
 mod byte_stream;
 mod config;
-mod auth;
+mod database;
+mod dto;
 mod error;
+mod storage;
 
-use std::{fs, io};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{fs, io};
 
 use auth::{AuthDriver, ldap_driver::LdapAuthDriver};
+use axum::body::Body;
 use axum::extract::DefaultBodyLimit;
+use axum::handler::Handler;
 use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use axum::{Router, routing};
-use axum::ServiceExt;
 use axum_server::tls_rustls::RustlsConfig;
 use lazy_static::lazy_static;
 use regex::Regex;
 use tokio::fs::File;
+use tower::ServiceBuilder;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_layer::Layer;
 
-use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions, SqliteJournalMode};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
 use tracing::metadata::LevelFilter;
@@ -36,7 +37,7 @@ use tracing::{debug, info};
 
 use app_state::AppState;
 use database::Database;
-use tracing_subscriber::{filter, EnvFilter};
+use tracing_subscriber::{EnvFilter, filter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::storage::StorageDriver;
@@ -47,11 +48,15 @@ use crate::config::{Config, DatabaseConfig, StorageConfig};
 use tower_http::trace::TraceLayer;
 
 lazy_static! {
-    static ref REGISTRY_URL_REGEX: Regex = regex::Regex::new(r"/v2/([\w\-_./]+)/(blobs|tags|manifests)").unwrap();
+    static ref REGISTRY_URL_REGEX: Regex =
+        regex::Regex::new(r"/v2/([\w\-_./]+)/(blobs|tags|manifests)").unwrap();
 }
 
 /// Encode the 'name' path parameter in the url
-async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Result<Response, StatusCode> {
+async fn change_request_paths(
+    mut request: Request<Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
     // Attempt to find the name using regex in the url
     let regex = &REGISTRY_URL_REGEX;
     let captures = match regex.captures(request.uri().path()) {
@@ -67,7 +72,8 @@ async fn change_request_paths<B>(mut request: Request<B>, next: Next<B>) -> Resu
     let uri_str = request.uri().to_string().replace(&name, &encoded_name);
     debug!("Rewrote request url to: '{}'", uri_str);
 
-    *request.uri_mut() = uri_str.parse()
+    *request.uri_mut() = uri_str
+        .parse()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(next.run(request).await)
@@ -87,9 +93,9 @@ fn create_path_to(path: &str) -> io::Result<()> {
 }
 
 #[tokio::main]
+#[warn(clippy::future_not_send)]
 async fn main() -> anyhow::Result<()> {
-    let mut config = Config::new()
-        .expect("Failure to parse config!");
+    let mut config = Config::new().expect("Failure to parse config!");
 
     let mut logging_guards = Vec::new();
     {
@@ -101,7 +107,9 @@ async fn main() -> anyhow::Result<()> {
 
         // Get a rolling file appender depending on the config
         let file_appender = match logc.roll_period {
-            config::RollPeriod::Minutely => tracing_appender::rolling::minutely(log_path, "orca.log"),
+            config::RollPeriod::Minutely => {
+                tracing_appender::rolling::minutely(log_path, "orca.log")
+            }
             config::RollPeriod::Hourly => tracing_appender::rolling::hourly(log_path, "orca.log"),
             config::RollPeriod::Daily => tracing_appender::rolling::daily(log_path, "orca.log"),
             config::RollPeriod::Never => tracing_appender::rolling::never(log_path, "orca.log"),
@@ -120,28 +128,22 @@ async fn main() -> anyhow::Result<()> {
                 Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(file_appender_nb)
-                        .json()
+                        .json(),
                 ),
                 Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(stdout_nb)
-                        .json()
+                        .json(),
                 ),
                 None,
-                None
+                None,
             ),
             config::LogFormat::Human => (
                 None,
                 None,
-                Some(
-                    tracing_subscriber::fmt::layer()
-                        .with_writer(file_appender_nb)
-                ),
-                Some(
-                    tracing_subscriber::fmt::layer()
-                        .with_writer(stdout_nb)
-                )
-            )
+                Some(tracing_subscriber::fmt::layer().with_writer(file_appender_nb)),
+                Some(tracing_subscriber::fmt::layer().with_writer(stdout_nb)),
+            ),
         };
 
         // Change filter to only log orca_api or everything
@@ -151,14 +153,16 @@ async fn main() -> anyhow::Result<()> {
             Some(
                 filter::Targets::new()
                     .with_target("orca_api", logc.level)
-                    .with_default(LevelFilter::INFO)
+                    .with_default(LevelFilter::INFO),
             )
         };
 
         // Get env filter if specified
         let env_filter = if let Some(env_filter) = &logc.env_filter {
             Some(EnvFilter::from_str(env_filter).unwrap())
-        } else { None };
+        } else {
+            None
+        };
 
         tracing_subscriber::registry()
             .with(json_a)
@@ -179,96 +183,138 @@ async fn main() -> anyhow::Result<()> {
         create_path_to(&sqlite_config.path)?;
         File::create(&sqlite_config.path).await?;
     }
-    
-    let connection_options = SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
-        .journal_mode(SqliteJournalMode::Wal);
+
+    let connection_options =
+        SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
+            .journal_mode(SqliteJournalMode::Wal);
     let pool = SqlitePoolOptions::new()
         .max_connections(15)
-        .connect_with(connection_options).await?;
+        .connect_with(connection_options)
+        .await?;
     pool.create_schema().await?;
 
     // set jwt key
     config.jwt_key = pool.get_jwt_secret().await?;
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = match &config.storage {
-        StorageConfig::Filesystem(fs) => {
-            Mutex::new(Box::new(FilesystemDriver::new(&fs.path)))
-        }
+        StorageConfig::Filesystem(fs) => Mutex::new(Box::new(FilesystemDriver::new(&fs.path))),
     };
-    
+
     // figure out the auth driver depending on whats specified in the config,
     // the fallback is a database auth driver.
     let auth_driver: Mutex<Box<dyn AuthDriver>> = match config.ldap.clone() {
         Some(ldap) => {
             let ldap_driver = LdapAuthDriver::new(ldap, pool.clone()).await?;
             Mutex::new(Box::new(ldap_driver))
-        },
-        None => {
-            Mutex::new(Box::new(pool.clone()))
         }
+        None => Mutex::new(Box::new(pool.clone())),
     };
 
-    let app_addr = SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
+    let app_addr =
+        SocketAddr::from_str(&format!("{}:{}", config.listen_address, config.listen_port))?;
 
     let tls_config = config.tls.clone();
-    let state = Arc::new(AppState::new(pool, storage_driver, config.clone(), auth_driver));
-   
+    let state = Arc::new(AppState::new(
+        pool,
+        storage_driver,
+        config.clone(),
+        auth_driver,
+    ));
+
     let auth_middleware = axum::middleware::from_fn_with_state(state.clone(), auth::check_auth);
     let path_middleware = axum::middleware::from_fn(change_request_paths);
-    
-    let app = Router::new()
-        .route("/token", routing::get(api::oci::auth::auth_basic_get)
-            .post(api::oci::auth::auth_basic_post))
-        .nest("/v2", Router::new()
-            .route("/", routing::get(api::oci::version_check))
-            .route("/_catalog", routing::get(api::oci::catalog::list_repositories))
-            .route("/:name/referrers/:digest", routing::get(api::oci::referrers::list_referrers_get))
-            .route("/:name/tags/list", routing::get(api::oci::tags::list_tags))
-            .nest("/:name/blobs", Router::new()
-                .route("/:digest", routing::get(api::oci::blobs::pull_digest_get)
-                    .head(api::oci::blobs::digest_exists_head)
-                    .delete(api::oci::blobs::delete_digest))
-                .nest("/uploads", Router::new()
-                    .route("/", routing::post(api::oci::uploads::start_upload_post))
-                    .route("/:uuid", 
-                        routing::patch(api::oci::uploads::chunked_upload_layer_patch)
-                        .put(api::oci::uploads::finish_chunked_upload_put)
-                        .delete(api::oci::uploads::cancel_upload_delete)
-                        .get(api::oci::uploads::check_upload_status_get)
-                    )
-                    .layer(DefaultBodyLimit::disable())
-                    .layer(RequestBodyLimitLayer::new(config.limits.body_limit))
-                )
-            )
-            .route("/:name/manifests/:reference", routing::get(api::oci::manifests::pull_manifest_get)
-                .put(api::oci::manifests::upload_manifest_put)
-                .head(api::oci::manifests::manifest_exists_head)
-                .delete(api::oci::manifests::delete_manifest))
-            .layer(auth_middleware) // require auth for ALL v2 routes
-        )
-        .nest("/orca", Router::new()
-            .route("/login", routing::post(api::orca::login_post))
-        )
-        .with_state(state)
-        .layer(TraceLayer::new_for_http());
 
-    let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
+    let app = Router::new()
+        .route(
+            "/token",
+            routing::get(api::oci::auth::auth_basic_get).post(api::oci::auth::auth_basic_post),
+        )
+        .nest(
+            "/v2",
+            Router::new()
+                .route("/", routing::get(api::oci::version_check))
+                .route(
+                    "/_catalog",
+                    routing::get(api::oci::catalog::list_repositories),
+                )
+                .route(
+                    "/:name/referrers/:digest",
+                    routing::get(api::oci::referrers::list_referrers_get),
+                )
+                .route("/:name/tags/list", routing::get(api::oci::tags::list_tags))
+                .nest(
+                    "/:name/blobs",
+                    Router::new()
+                        .route(
+                            "/:digest",
+                            routing::get(api::oci::blobs::pull_digest_get)
+                                .head(api::oci::blobs::digest_exists_head)
+                                .delete(api::oci::blobs::delete_digest),
+                        )
+                        .nest(
+                            "/uploads",
+                            Router::new()
+                                .route("/", routing::post(api::oci::uploads::start_upload_post))
+                                .route(
+                                    "/:uuid",
+                                    routing::patch(api::oci::uploads::chunked_upload_layer_patch)
+                                        .put(api::oci::uploads::finish_chunked_upload_put)
+                                        .delete(api::oci::uploads::cancel_upload_delete)
+                                        .get(api::oci::uploads::check_upload_status_get),
+                                )
+                                .layer(
+                                    ServiceBuilder::new()
+                                        .layer(DefaultBodyLimit::disable())
+                                        .layer(RequestBodyLimitLayer::new(
+                                            config.limits.manifest_limit,
+                                        )),
+                                ),
+                        ),
+                )
+                .route(
+                    "/:name/manifests/:reference",
+                    routing::get(api::oci::manifests::pull_manifest_get)
+                        .put(
+                            api::oci::manifests::upload_manifest_put.layer(
+                                ServiceBuilder::new()
+                                    .layer(DefaultBodyLimit::disable())
+                                    .layer(RequestBodyLimitLayer::new(
+                                        config.limits.manifest_limit,
+                                    )),
+                            ),
+                        )
+                        .head(api::oci::manifests::manifest_exists_head)
+                        .delete(api::oci::manifests::delete_manifest),
+                )
+                .layer(auth_middleware), // require auth for ALL v2 routes
+        )
+        .nest(
+            "/orca",
+            Router::new().route("/login", routing::post(api::orca::login_post)),
+        )
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http()) // 1st
+                .layer(path_middleware) // 2nd
+                .layer(NormalizePathLayer::trim_trailing_slash()), // 3rd
+        )
+        .with_state(state);
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
 
     match tls_config {
         Some(tls) if tls.enable => {
             info!("Starting https server, listening on {}", app_addr);
-        
+
             let config = RustlsConfig::from_pem_file(&tls.cert, &tls.key).await?;
 
             axum_server::bind_rustls(app_addr, config)
-                .serve(layered_app.into_make_service())
+                .serve(app)
                 .await?;
-        },
+        }
         _ => {
             info!("Starting http server, listening on {}", app_addr);
-            axum::Server::bind(&app_addr)
-                .serve(layered_app.into_make_service())
-                .await?;
+            axum_server::bind(app_addr)
+                .serve(app).await?;
         }
     }
 

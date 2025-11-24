@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use async_trait::async_trait;
 use axum::{http::{StatusCode, header, HeaderName, HeaderMap, request::Parts}, extract::FromRequestParts};
 use bitflags::bitflags;
 use chrono::{DateTime, Utc};
@@ -125,7 +124,6 @@ impl UserAuth {
     }
 }
 
-#[async_trait]
 impl FromRequestParts<Arc<AppState>> for UserAuth {
     type Rejection = (StatusCode, HeaderMap);
 

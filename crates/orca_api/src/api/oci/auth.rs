@@ -1,10 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use axum::{
-    extract::{Query, State},
-    http::{header, StatusCode},
-    response::{IntoResponse, Response},
-    Form,
+    Extension, Form, extract::{Query, State}, http::{StatusCode, header}, response::{IntoResponse, Response}
 };
 use axum_auth::AuthBasic;
 use chrono::{DateTime, Utc};
@@ -107,10 +104,10 @@ pub async fn auth_basic_post() -> Result<Response, StatusCode> {
 }
 
 pub async fn auth_basic_get(
-    basic_auth: Option<AuthBasic>,
+    basic_auth: Option<Extension<AuthBasic>>,
     state: State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    form: Option<Form<AuthForm>>,
+    form: Form<Option<AuthForm>>,
 ) -> Result<Response, StatusCode> {
     let mut auth = TokenAuthRequest {
         user: None,
@@ -139,9 +136,9 @@ pub async fn auth_basic_get(
     }
 
     // If BasicAuth is provided, set the fields to it
-    if let Some(AuthBasic((username, pass))) = basic_auth {
+    if let Some(AuthBasic((username, pass))) = basic_auth.as_deref() {
         auth.user = Some(username.clone());
-        auth.password = pass;
+        auth.password = pass.clone();
 
         // I hate having to create this span here multiple times, but its the only
         // way I could think of
@@ -154,9 +151,9 @@ pub async fn auth_basic_get(
     // Username and password could be passed in forms
     // If there was a way to also check if the Method was "POST", this is where
     // we would do it.
-    else if let Some(Form(form)) = form {
+    else if let Some(form) = &*form {
         auth.user = Some(form.username.clone());
-        auth.password = Some(form.password);
+        auth.password = Some(form.password.clone());
 
         let span = span!(Level::DEBUG, "auth", username = auth.user.clone());
         let _enter = span.enter();

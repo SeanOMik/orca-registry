@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::Arc;
 
-use axum::extract::{BodyStream, Path, Query, State};
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 
@@ -32,8 +33,9 @@ pub async fn chunked_upload_layer_patch(
     Path((name, layer_uuid)): Path<(String, String)>,
     headers: HeaderMap,
     state: State<Arc<AppState>>,
-    mut body: BodyStream,
+    body: Body,
 ) -> Result<Response, AppError> {
+    let mut body = body.into_data_stream();
     let storage = state.storage.lock().await;
     let current_size = storage.digest_length(&layer_uuid).await?;
 

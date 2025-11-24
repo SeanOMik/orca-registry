@@ -1,7 +1,6 @@
 use std::io::ErrorKind;
 use std::sync::Arc;
 
-use axum::body::StreamBody;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -69,8 +68,8 @@ pub async fn pull_digest_get(
 
             // convert the `AsyncRead` into a `Stream`
             let stream = ReaderStream::new(stream.into_async_read());
-            // convert the `Stream` into an `axum::body::HttpBody`
-            let body = StreamBody::new(stream);
+            // convert the `Stream` into a response body.
+            let body = axum::body::Body::from_stream(stream);
 
             debug!("length of range request: {}", starting - ending);
 
@@ -93,8 +92,8 @@ pub async fn pull_digest_get(
         } else {
             // convert the `AsyncRead` into a `Stream`
             let stream = ReaderStream::new(stream.into_async_read());
-            // convert the `Stream` into an `axum::body::HttpBody`
-            let body = StreamBody::new(stream);
+            // convert the `Stream` into a response body.
+            let body = axum::body::Body::from_stream(stream);
 
             debug!("length of streamed request: {}", len);
 

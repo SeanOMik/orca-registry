@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use rand::{Rng, distributions::Alphanumeric};
+use rand::{Rng, distr::Alphanumeric};
 use sqlx::{Sqlite, Pool};
 use thiserror::Error;
 use tracing::{debug, warn};

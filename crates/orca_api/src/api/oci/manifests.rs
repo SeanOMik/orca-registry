@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::body::BoxBody;
+use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderName, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -146,7 +146,7 @@ pub async fn upload_manifest_put(
                 resp.header(HeaderName::from_static("oci-subject"), subject)
             } else { resp };
 
-            Ok(resp.body(BoxBody::default()).unwrap())
+            Ok(resp.body(Body::default()).unwrap())
         }
         Manifest::Index(index) => {
             let subject_digest = index.subject.as_ref().map(|s| &s.digest);
@@ -186,7 +186,7 @@ pub async fn upload_manifest_put(
                 resp.header(HeaderName::from_static("oci-subject"), subject)
             } else { resp };
 
-            Ok(resp.body(BoxBody::default()).unwrap())
+            Ok(resp.body(Body::default()).unwrap())
         }
     }
 }
