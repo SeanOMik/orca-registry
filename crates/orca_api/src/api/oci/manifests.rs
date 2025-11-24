@@ -40,6 +40,29 @@ pub async fn upload_manifest_put(
         .await?
         .is_some()
     {
+        if !Digest::is_digest(&reference) && database.get_tag(&name, &reference).await?.map(|t| t.manifest_digest != calculated_digest).unwrap_or(true) {
+            let mut create_tag = false;
+
+            // 1. If the tag exists, check if the manifest digest matches the one being PUT'd, if it does not,
+            // delete the tag and recreate it, pointing to the new manifest.
+            // 2. If the tag DOES NOT exist, create one.    
+            if let Some(tag) = database.get_tag(&name, &reference).await? {
+                if tag.manifest_digest != calculated_digest {
+                    debug!("Replacing tag ':{}@{}' with new manifest: {}", reference, tag.manifest_digest, calculated_digest);
+                    database.delete_tag(&name, &reference).await?;
+                    create_tag = true;
+                }
+            } else {
+                create_tag = true;
+            }
+
+            if create_tag {
+                database
+                    .save_tag(&name, &reference, &calculated_digest)
+                    .await?;
+            }
+        }
+
         // no need to check the contents of the manifest since the calculated_digest
         // will match the content of it.
         return Ok((
@@ -76,10 +99,11 @@ pub async fn upload_manifest_put(
                 .save_manifest(&name, &calculated_digest, &body, subject_digest)
                 .await?;
 
-            info!("Saved manifest {}", calculated_digest);
+            debug!("Saved ImageManifest {calculated_digest}");
 
             // If the reference is not a digest, then it must be a tag name.
             if !Digest::is_digest(&reference) {
+                debug!("Tagging manifest as {reference}");
                 database
                     .save_tag(&name, &reference, &calculated_digest)
                     .await?;
@@ -93,11 +117,7 @@ pub async fn upload_manifest_put(
                 storage.add_referrer(&subject, r).await?;
             }
 
-            // Link the manifest to the image layer
-            debug!(
-                "Linking manifest {} to layer {}",
-                calculated_digest, image.config.digest
-            );
+            // Link the manifest to the image config layer
             database
                 .link_manifest_layer(&calculated_digest, &image.config.digest)
                 .await?;
@@ -106,11 +126,8 @@ pub async fn upload_manifest_put(
                 calculated_digest, image.config.digest
             );
 
+            // link the manifest to all the layers of the image
             for layer in image.layers {
-                debug!(
-                    "Linking manifest {} to layer {}",
-                    calculated_digest, layer.digest
-                );
                 database
                     .link_manifest_layer(&calculated_digest, &layer.digest)
                     .await?;
@@ -142,10 +159,11 @@ pub async fn upload_manifest_put(
                 .save_manifest(&name, &calculated_digest, &body, subject_digest)
                 .await?;
 
-            info!("Saved index manifest {}", calculated_digest);
+            debug!("Saved IndexManifest {calculated_digest}");
 
             // If the reference is not a digest, then it must be a tag name.
             if !Digest::is_digest(&reference) {
+                debug!("Tagging manifest as {reference}");
                 database
                     .save_tag(&name, &reference, &calculated_digest)
                     .await?;
