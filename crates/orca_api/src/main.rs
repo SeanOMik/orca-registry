@@ -304,10 +304,10 @@ async fn main() -> anyhow::Result<()> {
 
     match tls_config {
         Some(tls) if tls.enable => {
+            debug!("Loading TLS certs");
+
             // Use the awx_lc_rs crate for a future that may lead to FIPS compliance.
             rustls::crypto::aws_lc_rs::default_provider().install_default().unwrap();
-
-            debug!("Loading TLS certs");
 
             let cert = std::fs::read(&tls.cert)
                 .context("loading tls certificate")?;
@@ -368,7 +368,6 @@ async fn main() -> anyhow::Result<()> {
                         // tower's `Service` requires `&mut self`.
                         //
                         // We don't need to call `poll_ready` since `Router` is always ready.
-                        //service.call_all(reqs)
                         service.clone().call(request.map(axum::body::Body::new))
                     });
 
@@ -381,16 +380,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                 });
             }
-
-            /* axum_server::bind_rustls(app_addr, config)
-                .serve(layered_app)
-                .await?; */
         }
         _ => {
             info!("Starting http server, listening on {}", app_addr);
-            /* axum_server::bind(app_addr)
-                .serve(layered_app).await?; */
-            //let app = layered_app.into_make_service_with_connect_info::<std::net::SocketAddr>();
             let listener = tokio::net::TcpListener::bind(app_addr).await?;
             axum::serve(listener, layered_app.into_make_service()).await?;
         }

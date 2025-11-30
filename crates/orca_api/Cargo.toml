@@ -34,6 +34,7 @@ pin-project-lite = "0.2"
 anyhow = "1.0"
 async-stream = "0.3"
 axum = { version = "0.8.3", features = [ "macros" ] }
+#axum-server = { version = "0.7.2", features = [ "tls-rustls" ] }
 
 tower-http = { version = "0.6", features = [ "trace", "normalize-path", "limit" ] }
 tower-layer = { version = "0.3" }
@@ -52,11 +53,11 @@ bcrypt = ">=0.14.0,<1.0"
 bitflags = "2.0"
 ldap3 = ">=0.11.0,<1.0"
 lazy_static = "1.0"
-hyper = "1.0"
-thiserror = "2.0"
+hyper = { version = "1", features = ["http1", "http2", "server"] }
+thiserror = "2"
 tower = "0.5.2"
-rustls = "0.23.35"
-tokio-rustls = "0.26.4"
-rustls-pemfile = "2.2.0"
-hyper-util = "0.1.18"
+rustls = "0.23"
+tokio-rustls = "0.26"
+rustls-pemfile = "2.2"
+hyper-util = { version = "0.1", features = ["server-auto"] }
 base64 = "0.22.1"
