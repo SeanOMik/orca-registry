@@ -14,26 +14,31 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{fs, io};
 
+use anyhow::{Context, anyhow};
 use auth::{AuthDriver, ldap_driver::LdapAuthDriver};
-use axum::body::Body;
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::handler::Handler;
-use axum::http::{Request, StatusCode};
+use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::{Router, routing};
-use axum_server::tls_rustls::RustlsConfig;
+use axum::{Router, ServiceExt, routing};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use lazy_static::lazy_static;
 use regex::Regex;
+use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::fs::File;
-use tower::ServiceBuilder;
+use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
+use tower::{Layer, ServiceBuilder};
 use tower_http::limit::RequestBodyLimitLayer;
+use tower::Service;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
 use tracing::metadata::LevelFilter;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use app_state::AppState;
 use database::Database;
@@ -54,7 +59,7 @@ lazy_static! {
 
 /// Encode the 'name' path parameter in the url
 async fn change_request_paths(
-    mut request: Request<Body>,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     // Attempt to find the name using regex in the url
@@ -238,15 +243,15 @@ async fn main() -> anyhow::Result<()> {
                     routing::get(api::oci::catalog::list_repositories),
                 )
                 .route(
-                    "/:name/referrers/:digest",
+                    "/{name}/referrers/{digest}",
                     routing::get(api::oci::referrers::list_referrers_get),
                 )
-                .route("/:name/tags/list", routing::get(api::oci::tags::list_tags))
+                .route("/{name}/tags/list", routing::get(api::oci::tags::list_tags))
                 .nest(
-                    "/:name/blobs",
+                    "/{name}/blobs",
                     Router::new()
                         .route(
-                            "/:digest",
+                            "/{digest}",
                             routing::get(api::oci::blobs::pull_digest_get)
                                 .head(api::oci::blobs::digest_exists_head)
                                 .delete(api::oci::blobs::delete_digest),
@@ -256,7 +261,7 @@ async fn main() -> anyhow::Result<()> {
                             Router::new()
                                 .route("/", routing::post(api::oci::uploads::start_upload_post))
                                 .route(
-                                    "/:uuid",
+                                    "/{uuid}",
                                     routing::patch(api::oci::uploads::chunked_upload_layer_patch)
                                         .put(api::oci::uploads::finish_chunked_upload_put)
                                         .delete(api::oci::uploads::cancel_upload_delete)
@@ -264,23 +269,23 @@ async fn main() -> anyhow::Result<()> {
                                 )
                                 .layer(
                                     ServiceBuilder::new()
-                                        .layer(DefaultBodyLimit::disable())
                                         .layer(RequestBodyLimitLayer::new(
-                                            config.limits.manifest_limit,
-                                        )),
+                                            config.limits.body_limit,
+                                        ))
+                                        .layer(DefaultBodyLimit::disable()),
                                 ),
                         ),
                 )
                 .route(
-                    "/:name/manifests/:reference",
+                    "/{name}/manifests/{reference}",
                     routing::get(api::oci::manifests::pull_manifest_get)
                         .put(
                             api::oci::manifests::upload_manifest_put.layer(
                                 ServiceBuilder::new()
-                                    .layer(DefaultBodyLimit::disable())
                                     .layer(RequestBodyLimitLayer::new(
                                         config.limits.manifest_limit,
-                                    )),
+                                    ))
+                                    .layer(DefaultBodyLimit::disable()),
                             ),
                         )
                         .head(api::oci::manifests::manifest_exists_head)
@@ -292,29 +297,101 @@ async fn main() -> anyhow::Result<()> {
             "/orca",
             Router::new().route("/login", routing::post(api::orca::login_post)),
         )
-        .layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http()) // 1st
-                .layer(path_middleware) // 2nd
-                .layer(NormalizePathLayer::trim_trailing_slash()), // 3rd
-        )
-        .with_state(state);
-    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+        .with_state(state)
+        .layer(TraceLayer::new_for_http());
+
+    let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
+    //let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    //let layered_app = axum::ServiceExt::<Request<_>>::into_make_service(layered_app);
 
     match tls_config {
         Some(tls) if tls.enable => {
+            debug!("Loading TLS certs");
+
+            let cert = std::fs::read(&tls.cert)
+                .context("loading tls certificate")?;
+            let cert = rustls_pemfile::certs(&mut cert.as_ref())
+                .map(|it| it.map(|it| it.to_vec()))
+                .collect::<Result<Vec<_>, _>>()?;
+            // Check the entire PEM file for the key in case it is not first section
+            let key = std::fs::read(&tls.key)
+                .context("loading tls key")?;
+            let mut key_vec: Vec<Vec<u8>> = rustls_pemfile::read_all(&mut key.as_ref())
+                .filter_map(|i| match i.ok()? {
+                    rustls_pemfile::Item::Sec1Key(key) => Some(key.secret_sec1_der().to_vec()),
+                    rustls_pemfile::Item::Pkcs1Key(key) => Some(key.secret_pkcs1_der().to_vec()),
+                    rustls_pemfile::Item::Pkcs8Key(key) => Some(key.secret_pkcs8_der().to_vec()),
+                    _ => None,
+                })
+                .collect();
+
+            // Make sure file contains only one key
+            if key_vec.len() != 1 {
+                return Err(anyhow!("private key format not supported"));
+            }
+
+            let key = key_vec.pop().unwrap();
+            let cert = cert.into_iter().map(CertificateDer::from).collect();
+            let key = PrivateKeyDer::try_from(key).unwrap();
+
+            let mut config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert, key)?;
+            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+            let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+            
             info!("Starting https server, listening on {}", app_addr);
+            let tcp_listener = TcpListener::bind(app_addr).await.unwrap();
 
-            let config = RustlsConfig::from_pem_file(&tls.cert, &tls.key).await?;
+            loop {
+                let service = layered_app.clone();
+                let tls_acceptor = tls_acceptor.clone();
 
-            axum_server::bind_rustls(app_addr, config)
-                .serve(app)
-                .await?;
+                // Wait for a tcp connection
+                let (cnx, addr) = tcp_listener.accept().await?;
+
+                tokio::spawn(async move {
+                    // Wait for tls handshake to happen
+                    let Ok(stream) = tls_acceptor.accept(cnx).await else {
+                        tracing::error!("error during tls handshake connection from {}", addr);
+                        return;
+                    };
+
+                    // Hyper has its own traits that don't use tokio.
+                    // This converts between them.
+                    let stream = TokioIo::new(stream);
+
+                    let hyper_service = hyper::service::service_fn(move |request: Request<hyper::body::Incoming>| {
+                        // We have to clone `service` because hyper's `Service` uses `&self` whereas
+                        // tower's `Service` requires `&mut self`.
+                        //
+                        // We don't need to call `poll_ready` since `Router` is always ready.
+                        //service.call_all(reqs)
+                        service.clone().call(request.map(axum::body::Body::new))
+                    });
+
+                    let ret = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(stream, hyper_service)
+                        .await;
+
+                    if let Err(err) = ret {
+                        warn!("error serving connection from {}: {}", addr, err);
+                    }
+                });
+            }
+
+            /* axum_server::bind_rustls(app_addr, config)
+                .serve(layered_app)
+                .await?; */
         }
         _ => {
             info!("Starting http server, listening on {}", app_addr);
-            axum_server::bind(app_addr)
-                .serve(app).await?;
+            /* axum_server::bind(app_addr)
+                .serve(layered_app).await?; */
+            //let app = layered_app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+            let listener = tokio::net::TcpListener::bind(app_addr).await?;
+            axum::serve(listener, layered_app.into_make_service()).await?;
         }
     }
 

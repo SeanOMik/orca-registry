@@ -34,7 +34,6 @@ pin-project-lite = "0.2"
 anyhow = "1.0"
 async-stream = "0.3"
 axum = { version = "0.8.3", features = [ "macros" ] }
-axum-server = { version = "0.7.2", features = [ "tls-rustls" ] }
 
 tower-http = { version = "0.6", features = [ "trace", "normalize-path", "limit" ] }
 tower-layer = { version = "0.3" }
@@ -44,7 +43,6 @@ figment-cliarg-provider = { git = "https://github.com/SeanOMik/figment-cliarg-pr
 wild = "2.2"
 argmap = "1.1.2"
 serde_qs = "0.15"
-axum-auth = "0.8"
 qstring = "0.7.2"
 jwt = "0.16"
 hmac = "0.12.1"
@@ -57,3 +55,8 @@ lazy_static = "1.0"
 hyper = "1.0"
 thiserror = "2.0"
 tower = "0.5.2"
+rustls = "0.23.35"
+tokio-rustls = "0.26.4"
+rustls-pemfile = "2.2.0"
+hyper-util = "0.1.18"
+base64 = "0.22.1"

@@ -2,7 +2,7 @@ pub mod ldap_driver;
 
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{Extension, body::Body, extract::State, http::{HeaderMap, HeaderName, Method, Request, StatusCode, header}, middleware::Next, response::{IntoResponse, Response}};
+use axum::{Extension, extract::{Request, State}, http::{HeaderMap, HeaderName, Method, StatusCode, header}, middleware::Next, response::{IntoResponse, Response}};
 
 use tracing::{debug, warn, error};
 
@@ -134,7 +134,7 @@ pub fn access_denied_response(_config: &Config, scope: &Scope) -> Response {
     ).into_response()
 }
 
-pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<Extension<UserAuth>>, request: Request<Body>, next: Next) -> Result<Response, Rejection> {
+pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<Extension<UserAuth>>, request: Request, next: Next) -> Result<Response, Rejection> {
     let config = &state.config;
     // note: url is relative to /v2
     let url = request.uri().to_string();

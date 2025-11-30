@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use axum::{
-    Extension, Form, extract::{Query, State}, http::{StatusCode, header}, response::{IntoResponse, Response}
+    Form, extract::{Query, State, rejection::FormRejection}, http::{StatusCode, header}, response::{IntoResponse, Response}
 };
-use axum_auth::AuthBasic;
 use chrono::{DateTime, Utc};
+use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, span, Level};
 
@@ -15,12 +15,9 @@ use sha2::Sha256;
 use rand::Rng;
 
 use crate::{
-    app_state::AppState,
-    dto::{
-        scope::{Scope, ScopeType},
-        user::{AuthToken, TokenInfo},
-        RepositoryVisibility,
-    },
+    api::BasicAuthorization, app_state::AppState, dto::{
+        RepositoryVisibility, scope::{Scope, ScopeType}, user::{AuthToken, TokenInfo}
+    }
 };
 use crate::{
     database::Database,
@@ -103,12 +100,15 @@ pub async fn auth_basic_post() -> Result<Response, StatusCode> {
         .into_response());
 }
 
+#[axum::debug_handler]
 pub async fn auth_basic_get(
-    basic_auth: Option<Extension<AuthBasic>>,
+    basic_auth: Option<BasicAuthorization>,
     state: State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    form: Form<Option<AuthForm>>,
+    headers: HeaderMap,
+    form: Result<Form<AuthForm>, FormRejection>,
 ) -> Result<Response, StatusCode> {
+    debug!("auth headers: {:?}", headers);
     let mut auth = TokenAuthRequest {
         user: None,
         password: None,
@@ -136,9 +136,9 @@ pub async fn auth_basic_get(
     }
 
     // If BasicAuth is provided, set the fields to it
-    if let Some(AuthBasic((username, pass))) = basic_auth.as_deref() {
-        auth.user = Some(username.clone());
-        auth.password = pass.clone();
+    if let Some(basic) = basic_auth {
+        auth.user = Some(basic.username);
+        auth.password = Some(basic.password);
 
         // I hate having to create this span here multiple times, but its the only
         // way I could think of
@@ -151,7 +151,7 @@ pub async fn auth_basic_get(
     // Username and password could be passed in forms
     // If there was a way to also check if the Method was "POST", this is where
     // we would do it.
-    else if let Some(form) = &*form {
+    else if let Some(form) = form.ok() {
         auth.user = Some(form.username.clone());
         auth.password = Some(form.password.clone());
 
