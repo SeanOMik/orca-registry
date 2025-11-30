@@ -301,11 +301,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http());
 
     let layered_app = NormalizePathLayer::trim_trailing_slash().layer(path_middleware.layer(app));
-    //let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-    //let layered_app = axum::ServiceExt::<Request<_>>::into_make_service(layered_app);
 
     match tls_config {
         Some(tls) if tls.enable => {
+            // Use the awx_lc_rs crate for a future that may lead to FIPS compliance.
+            rustls::crypto::aws_lc_rs::default_provider().install_default().unwrap();
+
             debug!("Loading TLS certs");
 
             let cert = std::fs::read(&tls.cert)

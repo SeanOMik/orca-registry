@@ -65,8 +65,8 @@ pub fn create_jwt_token(
     let now = chrono::offset::Utc::now();
     let expiration = now + chrono::Duration::seconds(max_age_secs as _);
 
-    let mut rng = rand::thread_rng();
-    let jwtid = rng.r#gen::<u64>().to_string();
+    let mut rng = rand::rng();
+    let jwtid = rng.random::<u64>().to_string();
 
     // empty account if they are not authenticated
     let account = account.map(|a| a.to_string()).unwrap_or(String::new());
@@ -100,15 +100,12 @@ pub async fn auth_basic_post() -> Result<Response, StatusCode> {
         .into_response());
 }
 
-#[axum::debug_handler]
 pub async fn auth_basic_get(
     basic_auth: Option<BasicAuthorization>,
     state: State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
-    headers: HeaderMap,
     form: Result<Form<AuthForm>, FormRejection>,
 ) -> Result<Response, StatusCode> {
-    debug!("auth headers: {:?}", headers);
     let mut auth = TokenAuthRequest {
         user: None,
         password: None,
