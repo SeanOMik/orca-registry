@@ -41,22 +41,15 @@ pub async fn upload_manifest_put(
         .is_some()
     {
         if !Digest::is_digest(&reference) && database.get_tag(&name, &reference).await?.map(|t| t.manifest_digest != calculated_digest).unwrap_or(true) {
-            let mut create_tag = false;
-
             // 1. If the tag exists, check if the manifest digest matches the one being PUT'd, if it does not,
-            // delete the tag and recreate it, pointing to the new manifest.
+            // update the tag to point it to the new manifest.
             // 2. If the tag DOES NOT exist, create one.    
             if let Some(tag) = database.get_tag(&name, &reference).await? {
                 if tag.manifest_digest != calculated_digest {
-                    debug!("Replacing tag ':{}@{}' with new manifest: {}", reference, tag.manifest_digest, calculated_digest);
-                    database.delete_tag(&name, &reference).await?;
-                    create_tag = true;
+                    debug!("Replacing tag '{}' @ '{}' with new manifest: {}", reference, tag.manifest_digest, calculated_digest);
+                    database.update_tag(&name, &reference, &calculated_digest).await?;
                 }
             } else {
-                create_tag = true;
-            }
-
-            if create_tag {
                 database
                     .save_tag(&name, &reference, &calculated_digest)
                     .await?;
@@ -104,9 +97,16 @@ pub async fn upload_manifest_put(
             // If the reference is not a digest, then it must be a tag name.
             if !Digest::is_digest(&reference) {
                 debug!("Tagging manifest as {reference}");
-                database
-                    .save_tag(&name, &reference, &calculated_digest)
-                    .await?;
+
+                if database.get_tag(&name, &reference).await?.is_some() {
+                    database
+                        .update_tag(&name, &reference, &calculated_digest)
+                        .await?;
+                } else {
+                    database
+                        .save_tag(&name, &reference, &calculated_digest)
+                        .await?;
+                }
             }
 
             if let Some(subject) = subject_digest {

@@ -38,6 +38,7 @@ pub trait Database {
     async fn save_tag(&self, repository: &str, tag: &str, manifest_digest: &str) -> Result<(), DatabaseError>;
     /// Delete a tag.
     async fn delete_tag(&self, repository: &str, tag: &str) -> Result<(), DatabaseError>;
+    async fn update_tag(&self, repository: &str, tag: &str, manifest_digest: &str) -> Result<(), DatabaseError>;
 
     // Manifest related functions
 
@@ -232,11 +233,21 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn delete_tag(&self, repository: &str, tag: &str) -> Result<(), DatabaseError> {
-        sqlx::query("DELETE FROM image_tags WHERE 'name' = ? AND repository = ?")
+        sqlx::query("DELETE FROM image_tags WHERE name = ? AND repository = ?")
             .bind(tag)
             .bind(repository)
             .execute(self).await?;
 
+        Ok(())
+    }
+
+    async fn update_tag(&self, repository: &str, tag: &str, manifest_digest: &str) -> Result<(), DatabaseError> {
+        sqlx::query("UPDATE image_tags SET image_manifest = ?, last_updated = ? WHERE name = ? AND repository = ?")
+            .bind(manifest_digest)
+            .bind(chrono::Utc::now().timestamp())
+            .bind(tag)
+            .bind(repository)
+            .execute(self).await?;
         Ok(())
     }
 

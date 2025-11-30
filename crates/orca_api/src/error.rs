@@ -2,6 +2,7 @@ use axum::{http::StatusCode, response::{IntoResponse, Response}};
 use serde::Serialize;
 
 use crate::{database::DatabaseError, storage::StorageDriverError};
+use tracing::error;
 
 #[allow(dead_code)]
 #[derive(Debug, thiserror::Error, Clone)]
@@ -94,6 +95,8 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             },
             _ => {
+                error!("Unhandled internal error: {}", self);
+
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Something went wrong: {}", self),
