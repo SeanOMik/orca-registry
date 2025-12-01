@@ -200,7 +200,6 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn get_tag(&self, repository: &str, tag: &str) -> Result<Option<Tag>, DatabaseError> {
-        debug!("get tag");
         let row: (String, i64, ) = match sqlx::query_as("SELECT image_manifest, last_updated FROM image_tags WHERE name = ? AND repository = ?")
                 .bind(tag)
                 .bind(repository)

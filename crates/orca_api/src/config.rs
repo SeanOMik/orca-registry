@@ -158,11 +158,11 @@ impl Config {
             let args: Vec<String> = wild::args().collect();
             let (_args, argv) = argmap::parse(args.iter());
 
-            match argv.get("--config-path") {
+            match argv.get("--config") {
                 Some(path) => { 
                     path.first().unwrap().clone()
                 },
-                None => match env::var("ORCA_REG_CONFIG") {
+                None => match env::var("ORCA_CONFIG") {
                     Ok(path) => path,
                     Err(_) => "config.toml".to_string(),
                 }
@@ -172,7 +172,7 @@ impl Config {
         // Merge the config files
         let figment = Figment::new()
             .join(FigmentCliArgsProvider::new())
-            .join(Env::prefixed("ORCA_REG_"))
+            .join(Env::prefixed("ORCA_"))
             .join(Toml::file(format!("{}", path)));
 
         let mut config: Config = figment.extract()?;
@@ -188,7 +188,14 @@ impl Config {
     pub fn url(&self) -> String {
         match &self.url {
             Some(u) => u.clone(),
-            None => format!("http://{}:{}", self.listen_address, self.listen_port)
+            None => {
+                let mut scheme = "http";
+                if self.tls.is_some() {
+                    scheme = "https";
+                }
+
+                format!("{}://{}:{}", scheme, self.listen_address, self.listen_port)
+            }
         }
     }
 }
