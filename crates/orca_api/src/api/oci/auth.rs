@@ -4,7 +4,6 @@ use axum::{
     Form, extract::{Query, State, rejection::FormRejection}, http::{StatusCode, header}, response::{IntoResponse, Response}
 };
 use chrono::{DateTime, Utc};
-use hyper::HeaderMap;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, span, Level};
 

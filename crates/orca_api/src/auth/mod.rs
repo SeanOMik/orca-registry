@@ -2,9 +2,9 @@ pub mod ldap_driver;
 
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{Extension, extract::{Request, State}, http::{HeaderMap, HeaderName, Method, StatusCode, header}, middleware::Next, response::{IntoResponse, Response}};
+use axum::{extract::{OriginalUri, Request, State}, http::{HeaderMap, HeaderName, Method, StatusCode, header}, middleware::Next, response::{IntoResponse, Response}};
 
-use tracing::{debug, warn, error};
+use tracing::{debug, error};
 
 use crate::{app_state::AppState, config::Config, dto::{scope::{Action, Scope, ScopeType}, user::{Permission, RegistryUserType, UserAuth}, RepositoryVisibility}, error::{ErrorMessage, OciRegistryError}};
 use crate::database::Database;
@@ -134,25 +134,11 @@ pub fn access_denied_response(_config: &Config, scope: &Scope) -> Response {
     ).into_response()
 }
 
-pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<Extension<UserAuth>>, request: Request, next: Next) -> Result<Response, Rejection> {
+pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<UserAuth>, uri: OriginalUri, request: Request, next: Next) -> Result<Response, Rejection> {
     let config = &state.config;
-    // note: url is relative to /v2
-    let url = request.uri().to_string();
+    let path = uri.path();
 
-    if url == "/" {
-        // if auth is none, then the client needs to authenticate
-        if auth.is_none() {
-            debug!("Responding to /v2/ with an auth challenge");
-            return Ok(auth_challenge_response(config, None, vec![]));
-        }
-
-        debug!("user is authed");
-
-        // the client is authenticating right now
-        return Ok(next.run(request).await);
-    }
-    
-    let url_split: Vec<&str> = url.split("/").skip(1).collect();
+    let url_split: Vec<&str> = path.split("/").skip(2).collect(); // skip 2 to remove /v2/ from vec
     let target_name = url_split[0].replace("%2F", "/");
     let target_type = url_split[1];
 
@@ -170,7 +156,6 @@ pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<Extensi
         let scope = Scope::new(ScopeType::Repository, target_name.clone(), scope_actions);
 
         // respond with an auth challenge if there is no auth header.
-        //if !headers.contains_key(header::AUTHORIZATION) && auth.is_none() {
         if auth.is_none() {
             debug!("User is not authenticated, sending challenge");
             return Ok(auth_challenge_response(config, Some(scope), vec![]));
@@ -232,7 +217,8 @@ pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<Extensi
             }
         }
     } else {
-        warn!("Unhandled auth check for '{target_type}'!!"); // TODO
+        debug!("Unknown auth target type! '{target_type}'");
+        return Err((StatusCode::BAD_REQUEST, HeaderMap::default()));
     }
 
     Ok(next.run(request).await)

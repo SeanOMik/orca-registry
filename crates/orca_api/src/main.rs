@@ -234,10 +234,12 @@ async fn main() -> anyhow::Result<()> {
             "/token",
             routing::get(api::oci::auth::auth_basic_get).post(api::oci::auth::auth_basic_post),
         )
+        // /v2 endpoints that do not require auth
+        .route("/v2", routing::get(api::oci::version_check))
+        // This nested router for v2 has an auth middleware
         .nest(
             "/v2",
             Router::new()
-                .route("/", routing::get(api::oci::version_check))
                 .route(
                     "/_catalog",
                     routing::get(api::oci::catalog::list_repositories),
