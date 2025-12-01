@@ -430,7 +430,6 @@ impl Database for Pool<Sqlite> {
     }
 
     async fn get_user(&self, email: String) -> Result<Option<User>, DatabaseError> {
-        debug!("getting user");
         let email = email.to_lowercase();
         let row: (String, u32) = match sqlx::query_as("SELECT username, login_source FROM users WHERE email = ?")
             .bind(email.clone())

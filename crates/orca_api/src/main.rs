@@ -38,7 +38,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use tokio::sync::Mutex;
 use tower_http::normalize_path::NormalizePathLayer;
 use tracing::metadata::LevelFilter;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use app_state::AppState;
 use database::Database;
@@ -75,7 +75,7 @@ async fn change_request_paths(
 
     // Replace the name in the uri
     let uri_str = request.uri().to_string().replace(&name, &encoded_name);
-    debug!("Rewrote request url to: '{}'", uri_str);
+    trace!("Rewrote request url to: '{}'", uri_str);
 
     *request.uri_mut() = uri_str
         .parse()
