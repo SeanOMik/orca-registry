@@ -143,7 +143,7 @@ pub async fn check_auth(State(state): State<Arc<AppState>>, auth: Option<UserAut
     let target_type = url_split[1];
 
     // check if the request is targeting something inside an image repository
-    if target_type == "blobs" || target_type == "uploads" || target_type == "manifests" {
+    if target_type == "blobs" || target_type == "uploads" || target_type == "manifests" || target_type == "tags" {
         let scope_actions: &[Action] = match request.method().clone() {
             Method::GET | Method::HEAD => &[Action::Pull],
             Method::POST | Method::PATCH | Method::PUT => &[Action::Pull, Action::Push],

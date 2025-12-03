@@ -33,27 +33,17 @@ pub async fn upload_manifest_put(
     // anonymous users wouldn't be able to get to this point, so it should be safe to unwrap.
     let user = auth.user.unwrap();
     let database = &state.database;
+    let storage = &state.storage;
 
     // if the manifest already exists, respond now and don't try to make it again.
-    if database
-        .get_manifest(&name, &calculated_digest)
+    if storage.lock().await.get_manifest(&name, &calculated_digest)
         .await?
         .is_some()
     {
-        if !Digest::is_digest(&reference) && database.get_tag(&name, &reference).await?.map(|t| t.manifest_digest != calculated_digest).unwrap_or(true) {
-            // 1. If the tag exists, check if the manifest digest matches the one being PUT'd, if it does not,
-            // update the tag to point it to the new manifest.
-            // 2. If the tag DOES NOT exist, create one.    
-            if let Some(tag) = database.get_tag(&name, &reference).await? {
-                if tag.manifest_digest != calculated_digest {
-                    debug!("Replacing tag '{}' @ '{}' with new manifest: {}", reference, tag.manifest_digest, calculated_digest);
-                    database.update_tag(&name, &reference, &calculated_digest).await?;
-                }
-            } else {
-                database
-                    .save_tag(&name, &reference, &calculated_digest)
-                    .await?;
-            }
+        if !Digest::is_digest(&reference) && storage.lock().await.get_tag(&name, &reference).await?.map(|t| t.manifest_digest != calculated_digest).unwrap_or(true) {
+            storage.lock().await
+                .save_tag(&name, &reference, &calculated_digest)
+                .await?;
         }
 
         // no need to check the contents of the manifest since the calculated_digest
@@ -88,7 +78,7 @@ pub async fn upload_manifest_put(
             database
                 .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
                 .await?;
-            database
+            storage.lock().await
                 .save_manifest(&name, &calculated_digest, &body, subject_digest)
                 .await?;
 
@@ -98,15 +88,9 @@ pub async fn upload_manifest_put(
             if !Digest::is_digest(&reference) {
                 debug!("Tagging manifest as {reference}");
 
-                if database.get_tag(&name, &reference).await?.is_some() {
-                    database
-                        .update_tag(&name, &reference, &calculated_digest)
-                        .await?;
-                } else {
-                    database
-                        .save_tag(&name, &reference, &calculated_digest)
-                        .await?;
-                }
+                storage.lock().await
+                    .save_tag(&name, &reference, &calculated_digest)
+                    .await?;
             }
 
             if let Some(subject) = subject_digest {
@@ -115,26 +99,6 @@ pub async fn upload_manifest_put(
                 let storage = state.storage.lock().await;
                 let r = Referrer::from_image_manifest(&name, &calculated_digest, &image);
                 storage.add_referrer(&subject, r).await?;
-            }
-
-            // Link the manifest to the image config layer
-            database
-                .link_manifest_layer(&calculated_digest, &image.config.digest)
-                .await?;
-            debug!(
-                "Linked manifest {} to layer {}",
-                calculated_digest, image.config.digest
-            );
-
-            // link the manifest to all the layers of the image
-            for layer in image.layers {
-                database
-                    .link_manifest_layer(&calculated_digest, &layer.digest)
-                    .await?;
-                debug!(
-                    "Linked manifest {} to layer {}",
-                    calculated_digest, layer.digest
-                );
             }
 
             let resp = Response::builder()
@@ -155,7 +119,7 @@ pub async fn upload_manifest_put(
             database
                 .save_repository(&name, RepositoryVisibility::Private, Some(user.email), None)
                 .await?;
-            database
+            storage.lock().await
                 .save_manifest(&name, &calculated_digest, &body, subject_digest)
                 .await?;
 
@@ -164,7 +128,7 @@ pub async fn upload_manifest_put(
             // If the reference is not a digest, then it must be a tag name.
             if !Digest::is_digest(&reference) {
                 debug!("Tagging manifest as {reference}");
-                database
+                storage.lock().await
                     .save_tag(&name, &reference, &calculated_digest)
                     .await?;
             }
@@ -195,7 +159,8 @@ pub async fn pull_manifest_get(
     Path((name, reference)): Path<(String, String)>,
     state: State<Arc<AppState>>,
 ) -> Result<Response, AppError> {
-    let database = &state.database;
+    let storage = &state.storage;
+
     let digest = match Digest::is_digest(&reference) {
         true => reference.clone(),
         false => {
@@ -203,7 +168,7 @@ pub async fn pull_manifest_get(
                 "Attempting to get manifest digest using tag (repository={}, reference={})",
                 name, reference
             );
-            if let Some(tag) = database.get_tag(&name, &reference).await? {
+            if let Some(tag) = storage.lock().await.get_tag(&name, &reference).await? {
                 tag.manifest_digest
             } else {
                 return Ok(StatusCode::NOT_FOUND.into_response());
@@ -211,7 +176,7 @@ pub async fn pull_manifest_get(
         }
     };
 
-    let manifest = database.get_manifest(&name, &digest).await?;
+    let manifest = storage.lock().await.get_manifest(&name, &digest).await?;
     if manifest.is_none() {
         info!("Unknown manifest in repo {} for digest {}", name, digest);
         return Err(OciRegistryError::ManifestUnknown.into());
@@ -251,13 +216,13 @@ pub async fn manifest_exists_head(
     Path((name, reference)): Path<(String, String)>,
     state: State<Arc<AppState>>,
 ) -> Result<Response, AppError> {
-    debug!("start of head");
+    let storage = &state.storage;
+
     // Get the digest from the reference path.
-    let database = &state.database;
     let digest = match Digest::is_digest(&reference) {
         true => reference.clone(),
         false => {
-            if let Some(tag) = database.get_tag(&name, &reference).await? {
+            if let Some(tag) = storage.lock().await.get_tag(&name, &reference).await? {
                 tag.manifest_digest
             } else {
                 return Ok(StatusCode::NOT_FOUND.into_response());
@@ -266,7 +231,7 @@ pub async fn manifest_exists_head(
     };
     debug!("found digest: {}", digest);
 
-    let manifest = database.get_manifest(&name, &digest).await?;
+    let manifest = storage.lock().await.get_manifest(&name, &digest).await?;
     if manifest.is_none() {
         // The digest that was provided in the request was invalid.
         // NOTE: This could also mean that there's a bug and the tag pointed to an invalid manifest.
@@ -307,18 +272,19 @@ pub async fn delete_manifest(
     Path((name, reference)): Path<(String, String)>,
     state: State<Arc<AppState>>,
 ) -> Result<Response, AppError> {
-    let database = &state.database;
+    let storage = &state.storage;
+    
     let digest = match Digest::is_digest(&reference) {
         true => {
             // Check if the manifest exists
-            if database.get_manifest(&name, &reference).await?.is_none() {
+            if storage.lock().await.get_manifest(&name, &reference).await?.is_none() {
                 return Ok(StatusCode::NOT_FOUND.into_response());
             }
 
             reference.clone()
         }
         false => {
-            if let Some(tag) = database.get_tag(&name, &reference).await? {
+            if let Some(tag) = storage.lock().await.get_tag(&name, &reference).await? {
                 tag.manifest_digest
             } else {
                 return Ok(StatusCode::NOT_FOUND.into_response());
@@ -326,7 +292,7 @@ pub async fn delete_manifest(
         }
     };
 
-    database.delete_manifest(&name, &digest).await?;
+    storage.lock().await.delete_manifest(&name, &digest).await?;
 
     Ok((StatusCode::ACCEPTED, [(header::CONTENT_LENGTH, "None")]).into_response())
 }

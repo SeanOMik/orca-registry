@@ -16,8 +16,8 @@ pub async fn digest_exists_head(
 ) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
 
-    if storage.has_digest(&layer_digest).await? {
-        if let Some(size) = storage.digest_length(&layer_digest).await? {
+    if storage.has_layer(&layer_digest).await? {
+        if let Some(size) = storage.layer_size(&layer_digest).await? {
             return Ok((
                 StatusCode::OK,
                 [
@@ -43,8 +43,8 @@ pub async fn pull_digest_get(
 ) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
 
-    if let Some(len) = storage.digest_length(&layer_digest).await? {
-        let mut stream = match storage.get_digest_stream(&layer_digest).await? {
+    if let Some(len) = storage.layer_size(&layer_digest).await? {
+        let mut stream = match storage.get_layer_stream(&layer_digest).await? {
             Some(s) => s,
             None => {
                 // returns None when the digest was not found
@@ -121,7 +121,7 @@ pub async fn delete_digest(
 ) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
 
-    match storage.delete_digest(&layer_digest).await {
+    match storage.delete_layer(&layer_digest).await {
         Ok(()) => Ok(StatusCode::ACCEPTED.into_response()),
         Err(e) => match e {
             crate::storage::StorageDriverError::IoError(e) => {

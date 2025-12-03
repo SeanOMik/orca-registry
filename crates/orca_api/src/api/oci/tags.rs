@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{app_state::AppState, database::Database, error::AppError};
+use crate::{app_state::AppState, error::AppError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,16 +30,16 @@ pub async fn list_tags(
     Query(params): Query<ListRepositoriesParams>,
     state: State<Arc<AppState>>,
 ) -> Result<Response, AppError> {
+    let storage = &state.storage;
     let mut link_header = None;
 
     // Paginate tag results if n was specified, else just pull everything.
-    let database = &state.database;
     let tags = match params.limit {
         Some(limit) => {
             // Convert the last param to a String, and list all the tags
             let last_tag = params.last_tag.and_then(|t| Some(t.to_string()));
-            let tags = database
-                .list_repository_tags_page(&name, limit, last_tag)
+            let tags = storage.lock().await
+                .list_tags_page(&name, limit, last_tag)
                 .await?;
 
             // Get the new last repository for the response
@@ -56,7 +56,7 @@ pub async fn list_tags(
 
             tags
         }
-        None => database.list_repository_tags(&name).await?,
+        None => storage.lock().await.list_tags(&name).await?,
     };
 
     // Convert the `Vec<Tag>` to a `TagList` which will be serialized to json.

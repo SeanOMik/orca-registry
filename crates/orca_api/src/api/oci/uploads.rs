@@ -37,7 +37,7 @@ pub async fn chunked_upload_layer_patch(
 ) -> Result<Response, AppError> {
     let mut body = body.into_data_stream();
     let storage = state.storage.lock().await;
-    let current_size = storage.digest_length(&layer_uuid).await?;
+    let current_size = storage.layer_size(&layer_uuid).await?;
 
     // verify request range is correct
     // this ensures that out-of-order uploads are not attempted, and that
@@ -73,7 +73,7 @@ pub async fn chunked_upload_layer_patch(
 
             let byte_stream = ByteStream::new(io_stream);
             let len = storage
-                .save_digest_stream(&layer_uuid, byte_stream, true)
+                .save_layer_stream(&layer_uuid, byte_stream, true)
                 .await?;
 
             len
@@ -89,7 +89,7 @@ pub async fn chunked_upload_layer_patch(
 
             let bytes_len = bytes.len();
             storage
-                .save_digest(&layer_uuid, &bytes.into(), true)
+                .save_layer(&layer_uuid, &bytes.into(), true)
                 .await?;
             bytes_len
         }
@@ -141,12 +141,12 @@ pub async fn finish_chunked_upload_put(
 
     let storage = state.storage.lock().await;
     if !body.is_empty() {
-        storage.save_digest(&layer_uuid, &body, true).await?;
+        storage.save_layer(&layer_uuid, &body, true).await?;
     } else {
         // TODO: Validate layer with all digest params
     }
 
-    storage.replace_digest(&layer_uuid, &digest).await?;
+    storage.rename_layer(&layer_uuid, &digest).await?;
     debug!(
         "Completed upload, finished uuid {} to digest {}",
         layer_uuid, digest
@@ -171,7 +171,7 @@ pub async fn cancel_upload_delete(
     state: State<Arc<AppState>>,
 ) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
-    storage.delete_digest(&layer_uuid).await?;
+    storage.delete_layer(&layer_uuid).await?;
 
     // I'm not sure what this response should be, its not specified in the registry spec.
     Ok(StatusCode::OK.into_response())
@@ -182,7 +182,7 @@ pub async fn check_upload_status_get(
     state: State<Arc<AppState>>,
 ) -> Result<Response, AppError> {
     let storage = state.storage.lock().await;
-    if let Some(len) = storage.digest_length(&layer_uuid).await? {
+    if let Some(len) = storage.layer_size(&layer_uuid).await? {
         Ok((
             StatusCode::NO_CONTENT,
             [
