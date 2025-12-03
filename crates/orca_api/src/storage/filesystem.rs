@@ -103,7 +103,7 @@ impl FilesystemDriver {
     }
 
     /// Return the path of the file that stores the tag's manifest reference.
-    /// 
+    ///
     /// This will also ensure that the directory that contains the file exists.
     #[inline(always)]
     async fn tag_path(&self, repository: &str, tag: &str) -> tokio::io::Result<String> {
@@ -115,7 +115,7 @@ impl FilesystemDriver {
     }
 
     /// Return the path of the directory that stores repository tags.
-    /// 
+    ///
     /// This will also ensure that it exists.
     #[inline(always)]
     async fn tags_dir(&self, repository: &str) -> tokio::io::Result<String> {
@@ -313,11 +313,15 @@ impl StorageDriver for FilesystemDriver {
         Ok(())
     }
 
-    async fn delete_layer(&self, digest: &str) -> Result<(), StorageDriverError> {
+    async fn delete_layer(&self, digest: &str) -> Result<bool, StorageDriverError> {
         let path = self.layer_path(digest);
-        fs::remove_file(path).await?;
 
-        Ok(())
+        if fs::try_exists(&path).await? {
+            fs::remove_file(path).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn rename_layer(&self, uuid: &str, digest: &str) -> Result<(), StorageDriverError> {
@@ -369,11 +373,15 @@ impl StorageDriver for FilesystemDriver {
         Ok(())
     }
 
-    async fn delete_tag(&self, repository: &str, tag: &str) -> Result<(), StorageDriverError> {
+    async fn delete_tag(&self, repository: &str, tag: &str) -> Result<bool, StorageDriverError> {
         let path = self.tag_path(repository, tag).await?;
-        fs::remove_file(&path).await?;
 
-        Ok(())
+        if fs::try_exists(&path).await? {
+            fs::remove_file(&path).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn list_tags(&self, repository: &str) -> Result<Vec<Tag>, StorageDriverError> {
@@ -385,20 +393,23 @@ impl StorageDriver for FilesystemDriver {
         while let Some(entry) = dir.next_entry().await? {
             if entry.file_type().await?.is_file() {
                 match tag_files.binary_search(&entry.path()) {
-                    Ok(_) => {}, // element exists already
+                    Ok(_) => {} // element exists already
                     Err(pos) => tag_files.insert(pos, entry.path()),
                 }
             }
         }
 
         let mut tags = vec![];
-        
+
         for tag_file in tag_files {
             if tag_file.is_file() {
                 let name = match tag_file.file_name().unwrap().to_str() {
                     Some(name) => name,
                     None => {
-                        error!("Failed to read tag name from file, skipping tag: '{:?}'", tag_file.file_name().unwrap());
+                        error!(
+                            "Failed to read tag name from file, skipping tag: '{:?}'",
+                            tag_file.file_name().unwrap()
+                        );
                         continue;
                     }
                 };
@@ -410,10 +421,15 @@ impl StorageDriver for FilesystemDriver {
 
                 let manifest_digest = fs::read_to_string(path).await?;
 
-                tags.push(Tag { name: name.into(), repository: repository.to_string(), last_updated, manifest_digest });
+                tags.push(Tag {
+                    name: name.into(),
+                    repository: repository.to_string(),
+                    last_updated,
+                    manifest_digest,
+                });
             }
         }
-        
+
         Ok(tags)
     }
 
@@ -431,7 +447,7 @@ impl StorageDriver for FilesystemDriver {
         while let Some(entry) = dir.next_entry().await? {
             if entry.file_type().await?.is_file() {
                 match tag_files.binary_search(&entry.path()) {
-                    Ok(_) => {}, // element exists already
+                    Ok(_) => {} // element exists already
                     Err(pos) => tag_files.insert(pos, entry.path()),
                 }
             }
@@ -442,20 +458,21 @@ impl StorageDriver for FilesystemDriver {
         match last_tag {
             Some(last_tag) => {
                 // find the index of the last tag in the list
-                let last_tag_pos = tag_files.iter().position(|path| {
-                    path.ends_with(&last_tag)
-                });
+                let last_tag_pos = tag_files.iter().position(|path| path.ends_with(&last_tag));
 
                 if last_tag_pos.is_none() {
                     return Ok(vec![]);
-                } 
+                }
                 let pos = last_tag_pos.unwrap();
 
                 for tag in tag_files.iter().skip(pos + 1).take(limit as usize) {
                     let name = match tag.file_name().unwrap().to_str() {
                         Some(name) => name,
                         None => {
-                            error!("Failed to read tag name from file, skipping tag: '{:?}'", tag.file_name().unwrap());
+                            error!(
+                                "Failed to read tag name from file, skipping tag: '{:?}'",
+                                tag.file_name().unwrap()
+                            );
                             continue;
                         }
                     };
@@ -466,16 +483,24 @@ impl StorageDriver for FilesystemDriver {
 
                     let manifest_digest = fs::read_to_string(tag).await?;
 
-                    tags.push(Tag { name: name.into(), repository: repository.to_string(), last_updated, manifest_digest });
+                    tags.push(Tag {
+                        name: name.into(),
+                        repository: repository.to_string(),
+                        last_updated,
+                        manifest_digest,
+                    });
                 }
-            },
+            }
             None => {
                 for tag_file in tag_files {
                     if tag_file.is_file() {
                         let name = match tag_file.file_name().unwrap().to_str() {
                             Some(name) => name,
                             None => {
-                                error!("Failed to read tag name from file, skipping tag: '{:?}'", tag_file.file_name().unwrap());
+                                error!(
+                                    "Failed to read tag name from file, skipping tag: '{:?}'",
+                                    tag_file.file_name().unwrap()
+                                );
                                 continue;
                             }
                         };
@@ -487,10 +512,15 @@ impl StorageDriver for FilesystemDriver {
 
                         let manifest_digest = fs::read_to_string(path).await?;
 
-                        tags.push(Tag { name: name.into(), repository: repository.to_string(), last_updated, manifest_digest });
+                        tags.push(Tag {
+                            name: name.into(),
+                            repository: repository.to_string(),
+                            last_updated,
+                            manifest_digest,
+                        });
                     }
                 }
-            },
+            }
         }
 
         Ok(tags)
@@ -502,7 +532,7 @@ impl StorageDriver for FilesystemDriver {
         digest: &str,
     ) -> Result<Option<String>, StorageDriverError> {
         let path = self.manifest_path(digest).await?;
-        
+
         if fs::try_exists(&path).await? {
             let manifest = fs::read_to_string(&path).await?;
             Ok(Some(manifest))
@@ -528,14 +558,14 @@ impl StorageDriver for FilesystemDriver {
         Ok(())
     }
 
-    async fn delete_manifest(
-        &self,
-        _: &str,
-        digest: &str,
-    ) -> Result<(), StorageDriverError> {
+    async fn delete_manifest(&self, _: &str, digest: &str) -> Result<bool, StorageDriverError> {
         let path = self.manifest_path(digest).await?;
-        fs::remove_dir_all(path).await?;
 
-        Ok(())
+        if fs::try_exists(&path).await? {
+            fs::remove_dir_all(path).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }

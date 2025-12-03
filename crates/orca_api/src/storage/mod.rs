@@ -43,7 +43,7 @@ pub trait StorageDriver: Send + Sync {
     /// > Note: Not all drivers support byte streaming, check [`StorageDriver::supports_streaming`] before calling it.
     async fn save_layer_stream(&self, digest: &str, stream: ByteStream, append: bool) -> Result<usize, StorageDriverError>;
     /// Delete a layer.
-    async fn delete_layer(&self, digest: &str) -> Result<(), StorageDriverError>;
+    async fn delete_layer(&self, digest: &str) -> Result<bool, StorageDriverError>;
     /// Rename a layer.
     /// 
     /// This is used during chunked uploading of layers. Temporary uploads receive UUIDs which
@@ -81,7 +81,7 @@ pub trait StorageDriver: Send + Sync {
     /// Parameters:
     /// * `repository` - The repository the tag will be created inside.
     /// * `tag` - The name of the tag to create.
-    async fn delete_tag(&self, repository: &str, tag: &str) -> Result<(), StorageDriverError>;
+    async fn delete_tag(&self, repository: &str, tag: &str) -> Result<bool, StorageDriverError>;
     /// List the tags for the repository in lexical order.
     /// 
     /// Parameters:
@@ -120,5 +120,5 @@ pub trait StorageDriver: Send + Sync {
     /// Parameters:
     /// * `repository` - The repository the manifest is contained in.
     /// * `digest` - The digest of the manifest to delete.
-    async fn delete_manifest(&self, repository: &str, digest: &str) -> Result<(), StorageDriverError>;
+    async fn delete_manifest(&self, repository: &str, digest: &str) -> Result<bool, StorageDriverError>;
 }
