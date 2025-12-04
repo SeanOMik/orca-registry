@@ -1,20 +1,22 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use ldap3::{LdapConnAsync, Ldap, Scope, SearchEntry};
-use sqlx::{Pool, Sqlite};
+use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
-use crate::{config::LdapConnectionConfig, dto::{user::{Permission, LoginSource, RegistryUserType}, RepositoryVisibility}, database::Database};
+use crate::{auth::DatabaseAuthDriver, config::LdapConnectionConfig, dto::{RepositoryVisibility, user::{LoginSource, Permission, RegistryUserType}}};
 
 use super::AuthDriver;
 
 pub struct LdapAuthDriver {
     ldap_config: LdapConnectionConfig,
     ldap: Ldap,
-    database: Pool<Sqlite>,
+    database: Arc<Mutex<dyn DatabaseAuthDriver>>,
 }
 
 impl LdapAuthDriver {
-    pub async fn new(config: LdapConnectionConfig, database: Pool<Sqlite>) -> anyhow::Result<Self> {
+    pub async fn new(config: LdapConnectionConfig, database: Arc<Mutex<dyn DatabaseAuthDriver>>) -> anyhow::Result<Self> {
         debug!("connecting to ldap");
         let (conn, ldap) = LdapConnAsync::new(&config.connection_url).await?;
         ldap3::drive!(conn);
@@ -62,7 +64,7 @@ impl AuthDriver for LdapAuthDriver {
             debug!("LDAP is falling back to database");
 
             // fall back to database auth since this user might be local
-            self.database.user_has_permission(email, repository, permission, required_visibility).await
+            self.database.lock().await.user_has_permission(email, repository, permission, required_visibility).await
         }
     }
 
@@ -91,7 +93,8 @@ impl AuthDriver for LdapAuthDriver {
             if res.rc == 0 {
                 // The user was authenticated through ldap!
                 // Check if the user is stored in the database, if not, add it.
-                let database = &self.database;
+                let database = self.database.clone();
+                let database = database.lock().await;
                 if !database.does_user_exist(email.clone()).await? {
                     let display_name = match entry.attrs.get(&self.ldap_config.display_name_attribute) {
                         // theres no way the vector would be empty
@@ -107,7 +110,7 @@ impl AuthDriver for LdapAuthDriver {
                         false => RegistryUserType::Regular
                     };
 
-                    self.database.set_user_registry_type(email, user_type).await?;
+                    database.set_user_registry_type(email, user_type).await?;
                 }
 
                 Ok(true)
@@ -117,8 +120,7 @@ impl AuthDriver for LdapAuthDriver {
             } else {
                 // this would fail, its just here to propagate the error down
                 res.success()?;
-
-                Ok(false)
+                unreachable!()
             }
         }
     }

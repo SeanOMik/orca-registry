@@ -23,11 +23,18 @@ pub trait AuthDriver: Send + Sync {
     async fn verify_user_login(&mut self, email: String, password: String) -> anyhow::Result<bool>;
 }
 
+pub trait DatabaseAuthDriver: AuthDriver + Database {}
+
+#[async_trait]
+impl<T> DatabaseAuthDriver for T 
+where
+    T: Database + AuthDriver {}
+
 // Implement AuthDriver for anything the implements Database
 #[async_trait]
 impl<T> AuthDriver for T 
 where
-    T: Database + Send + Sync
+    T: Database
 {
     async fn user_has_permission(&mut self, email: String, repository: String, permission: Permission, required_visibility: Option<RepositoryVisibility>) -> anyhow::Result<bool> {
         match self.get_repository_owner(&repository).await? {

@@ -9,6 +9,11 @@ url = "http://localhost:3000/"
 ## Set to 0 for tokens that never expire. UNSAFE
 # token_max_age = 14400 # 4hr
 
+## A random string used for creating JWT secrets.
+##
+## Generate with: "openssl rand -base64 16"
+# jwt_secret = ""
+
 [limits]
 ## Manifest limit size in bytes
 # manifest_limit = 10_000_000 # 10 MB

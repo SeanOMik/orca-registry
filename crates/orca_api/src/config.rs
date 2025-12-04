@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use figment::{Figment, providers::{Env, Toml, Format}};
 use figment_cliarg_provider::FigmentCliArgsProvider;
 use serde::{Deserialize, Deserializer};
@@ -41,9 +42,28 @@ pub enum StorageConfig {
     Filesystem(FilesystemDriverConfig),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DatabaseKind {
+    Sqlite,
+    Postgres,
+}
+
 #[derive(Deserialize, Clone)]
-pub struct SqliteDbConfig {
-    pub path: String,
+pub struct DatabaseConfig {
+    pub url: String,
+    pub max_connections: u32,
+}
+
+impl DatabaseConfig {
+    pub fn kind(&self) -> anyhow::Result<DatabaseKind> {
+        if self.url.starts_with("sqlite") {
+            Ok(DatabaseKind::Sqlite)
+        } else if self.url.starts_with("postgres") {
+            Ok(DatabaseKind::Postgres)
+        } else {
+            Err(anyhow!("Invalid database connection url, or unsupported database!"))
+        }
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -85,12 +105,6 @@ pub struct TlsConfig {
     pub enable: bool,
     pub key: String,
     pub cert: String,
-}
-
-#[derive(Deserialize, Clone)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DatabaseConfig {
-    Sqlite(SqliteDbConfig),
 }
 
 #[derive(Deserialize, Clone, Default)]

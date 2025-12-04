@@ -45,10 +45,11 @@ use database::Database;
 use tracing_subscriber::{EnvFilter, filter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use crate::auth::DatabaseAuthDriver;
 use crate::storage::StorageDriver;
 use crate::storage::filesystem::FilesystemDriver;
 
-use crate::config::{Config, DatabaseConfig, StorageConfig};
+use crate::config::{Config, StorageConfig};
 
 use tower_http::trace::TraceLayer;
 
@@ -179,23 +180,37 @@ async fn main() -> anyhow::Result<()> {
             .init();
     }
 
-    let sqlite_config = match &config.database {
-        DatabaseConfig::Sqlite(sqlite) => sqlite,
+    let (pool, db_auth_driver) = match config.database.kind()? {
+        config::DatabaseKind::Sqlite => {
+            let path = {
+                config.database.url
+                    .trim_start_matches("sqlite://")
+                    .trim_start_matches("sqlite:")
+            };
+
+            // Create a database file if it doesn't exist already
+            if !Path::new(&path).exists() {
+                create_path_to(&path)?;
+                File::create(&path).await?;
+            }
+
+            let connection_options =
+                SqliteConnectOptions::from_str(&config.database.url)?
+                    .journal_mode(SqliteJournalMode::Wal);
+            let pool = SqlitePoolOptions::new()
+                .max_connections(config.database.max_connections)
+                .connect_with(connection_options)
+                .await?;
+            
+            (
+                Arc::new(pool.clone()) as Arc<dyn Database>,
+                Arc::new(Mutex::new(pool)) as Arc<Mutex<dyn DatabaseAuthDriver>>,
+            )
+        },
+        config::DatabaseKind::Postgres => todo!("Implement postgres"),
     };
 
-    // Create a database file if it doesn't exist already
-    if !Path::new(&sqlite_config.path).exists() {
-        create_path_to(&sqlite_config.path)?;
-        File::create(&sqlite_config.path).await?;
-    }
-
-    let connection_options =
-        SqliteConnectOptions::from_str(&format!("sqlite://{}", &sqlite_config.path))?
-            .journal_mode(SqliteJournalMode::Wal);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(15)
-        .connect_with(connection_options)
-        .await?;
+    // Run migrations on the database
     pool.run_migrations().await?;
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = match &config.storage {
@@ -204,12 +219,12 @@ async fn main() -> anyhow::Result<()> {
 
     // figure out the auth driver depending on whats specified in the config,
     // the fallback is a database auth driver.
-    let auth_driver: Mutex<Box<dyn AuthDriver>> = match config.ldap.clone() {
+    let auth_driver: Arc<Mutex<dyn AuthDriver>> = match config.ldap.clone() {
         Some(ldap) => {
-            let ldap_driver = LdapAuthDriver::new(ldap, pool.clone()).await?;
-            Mutex::new(Box::new(ldap_driver))
-        }
-        None => Mutex::new(Box::new(pool.clone())),
+            let ldap_driver = LdapAuthDriver::new(ldap, db_auth_driver).await?;
+            Arc::new(Mutex::new(ldap_driver))
+        },
+        None => db_auth_driver,
     };
 
     let app_addr =
