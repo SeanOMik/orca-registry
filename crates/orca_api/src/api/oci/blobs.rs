@@ -122,7 +122,7 @@ pub async fn delete_digest(
     let storage = state.storage.lock().await;
 
     match storage.delete_layer(&layer_digest).await {
-        Ok(()) => Ok(StatusCode::ACCEPTED.into_response()),
+        Ok(_) => Ok(StatusCode::ACCEPTED.into_response()),
         Err(e) => match e {
             crate::storage::StorageDriverError::IoError(e) => {
                 if e.kind() == ErrorKind::NotFound {

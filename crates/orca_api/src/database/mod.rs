@@ -1,12 +1,11 @@
 use async_trait::async_trait;
-use rand::{Rng, distr::Alphanumeric};
 use sqlx::{Sqlite, Pool};
 use thiserror::Error;
 use tracing::{debug, warn};
 
 use chrono::{DateTime, Utc};
 
-use crate::dto::{user::{User, RepositoryPermissions, RegistryUserType, Permission, UserAuth, LoginSource}, RepositoryVisibility};
+use crate::dto::{user::{User, RepositoryPermissions, RegistryUserType, Permission, LoginSource}, RepositoryVisibility};
 
 #[derive(Debug, Error)]
 pub enum DatabaseError {
@@ -20,12 +19,7 @@ pub enum DatabaseError {
 
 #[async_trait]
 pub trait Database {
-    // Digest related functions
-
-    /// Create the tables in the database
-    async fn create_schema(&self) -> Result<(), DatabaseError>;
-
-    async fn get_jwt_secret(&self) -> Result<String, DatabaseError>;
+    async fn run_migrations(&self) -> Result<(), DatabaseError>;
 
     // Repository related functions
 
@@ -50,18 +44,15 @@ pub trait Database {
     async fn get_user_repo_permissions(&self, email: String, repository: String) -> Result<Option<RepositoryPermissions>, DatabaseError>;
     async fn get_user_registry_usertype(&self, email: String) -> Result<Option<RegistryUserType>, DatabaseError>;
     async fn store_user_token(&self, token: String, email: String, expiry: DateTime<Utc>, created_at: DateTime<Utc>) -> Result<(), DatabaseError>;
-    #[deprecated = "Tokens are now verified using a secret"]
-    async fn verify_user_token(&self, token: String) -> Result<Option<UserAuth>, DatabaseError>;
 }
 
 #[async_trait]
 impl Database for Pool<Sqlite> {
-    async fn create_schema(&self) -> Result<(), DatabaseError> {
-        let orca_version = "0.1.0";
-        let schema_version = "0.0.1";
+    async fn run_migrations(&self) -> Result<(), DatabaseError> {
+        let orca_version = env!("CARGO_PKG_VERSION");
 
-        let row: Option<(u32, )> = match sqlx::query_as("SELECT COUNT(1) FROM orca WHERE \"schema_version\" = ?")
-                .bind(schema_version)
+        let row: Option<(String, )> = match sqlx::query_as("SELECT orca_version, max(id) FROM _orca_meta")
+                .bind(orca_version)
                 .fetch_one(self).await {
             Ok(row) => Some(row),
             Err(e) => match e {
@@ -76,81 +67,15 @@ impl Database for Pool<Sqlite> {
             }
         };
 
-        sqlx::query(include_str!("schemas/schema.sql"))
-            .execute(self).await?;
-        debug!("Created database schema");
-
-        if row.is_none() || row.unwrap().0 == 0 {
-            let jwt_sec: String = rand::rng()
-                .sample_iter(&Alphanumeric)
-                .take(16)
-                .map(char::from)
-                .collect();
-
-            // create schema
-            // TODO: Check if needed
-            /* sqlx::query(include_str!("schemas/schema.sql"))
-                .execute(self).await?;
-            debug!("Created database schema"); */
-
-            sqlx::query("INSERT INTO orca(orca_version, schema_version, jwt_secret) VALUES (?, ?, ?)")
-                .bind(orca_version)
-                .bind(schema_version)
-                .bind(jwt_sec)
-                .execute(self).await?;
-            debug!("Inserted information about orca!");
+        if let Some(db_orca_version) = row.map(|r| r.0) {
+            assert_eq!(orca_version, db_orca_version, "TODO: check the database orca version is less than or equal to the running");
         }
+
+        sqlx::migrate!("migrations/sqlite").run(self).await
+            .map_err(|e| DatabaseError::Internal(e.into()))?;
 
         Ok(())
     }
-
-    async fn get_jwt_secret(&self) -> Result<String, DatabaseError> {
-        let rows: (String, ) = sqlx::query_as("SELECT jwt_secret FROM orca WHERE id = (SELECT max(id) FROM orca)")
-            .fetch_one(self).await?;
-
-        Ok(rows.0)
-    }
-
-    /* async fn list_repository_tags(&self, repository: &str,) -> Result<Vec<Tag>, DatabaseError> {
-        let rows: Vec<(String, String, i64, )> = sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ?")
-                .bind(repository)
-                .fetch_all(self).await?;
-
-        // Convert the rows into `Tag`
-        let tags: Vec<Tag> = rows.into_iter().map(|row| {
-            let last_updated: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_opt(row.2, 0).unwrap(), Utc);
-            Tag::new(row.0, repository.to_string(), last_updated, row.1)
-        }).collect();
-
-        Ok(tags)
-    }
-
-    async fn list_repository_tags_page(&self, repository: &str, limit: u32, last_tag: Option<String>) -> Result<Vec<Tag>, DatabaseError> {
-        // Query differently depending on if `last_tag` was specified
-        let rows: Vec<(String, String, i64, )> = match last_tag {
-            Some(last_tag) => {
-                sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ? AND name > ? ORDER BY name LIMIT ?")
-                    .bind(repository)
-                    .bind(last_tag)
-                    .bind(limit)
-                    .fetch_all(self).await?
-            },
-            None => {
-                sqlx::query_as("SELECT name, image_manifest, last_updated FROM image_tags WHERE repository = ? ORDER BY name LIMIT ?")
-                    .bind(repository)
-                    .bind(limit)
-                    .fetch_all(self).await?
-            }
-        };
-
-        // Convert the rows into `Tag`
-        let tags: Vec<Tag> = rows.into_iter().map(|row| {
-            let last_updated: DateTime<Utc> = DateTime::from_utc(NaiveDateTime::from_timestamp_opt(row.2, 0).unwrap(), Utc);
-            Tag::new(row.0, repository.to_string(), last_updated, row.1)
-        }).collect();
-
-        Ok(tags)
-    } */
 
     async fn has_repository(&self, repository: &str) -> Result<bool, DatabaseError> {
         let row: (u32, ) = match sqlx::query_as("SELECT COUNT(1) FROM repositories WHERE \"name\" = ?")
@@ -425,9 +350,5 @@ impl Database for Pool<Sqlite> {
             .execute(self).await?;
 
         Ok(())
-    }
-    
-    async fn verify_user_token(&self, _token: String) -> Result<Option<UserAuth>, DatabaseError> {
-        panic!("ERR: Database::verify_user_token is deprecated!")
     }
 }

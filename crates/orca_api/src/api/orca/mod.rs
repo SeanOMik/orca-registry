@@ -20,7 +20,7 @@ pub async fn login_post(
 ) -> Result<Response, AppError> {
     if state.database.verify_user_login(body.email.clone(), body.password).await? {
         let config = &state.config;
-        let token_info = create_jwt_token(&config.jwt_key, config.token_max_age, Some(&body.email), vec![])
+        let token_info = create_jwt_token(&config.jwt_secret, config.token_max_age, Some(&body.email), vec![])
             .expect("failed to create auth token");
         let token = token_info.token;
 

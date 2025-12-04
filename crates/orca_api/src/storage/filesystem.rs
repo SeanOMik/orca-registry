@@ -357,7 +357,7 @@ impl StorageDriver for FilesystemDriver {
                 manifest_digest,
             }))
         } else {
-            todo!()
+            Ok(None)
         }
     }
 
@@ -548,11 +548,11 @@ impl StorageDriver for FilesystemDriver {
         content: &str,
         subject: Option<&String>,
     ) -> Result<(), StorageDriverError> {
-        let path = self.manifest_path(digest).await?;
-        fs::write(&path, content).await?;
+        let path = self.manifest_dir(digest).await?;
+        fs::write(format!("{path}/manifest.json"), content).await?;
 
-        if subject.is_some() {
-            todo!("Write manifest subject");
+        if let Some(subject) = subject {
+            fs::write(format!("{path}/subject"), subject).await?;
         }
 
         Ok(())

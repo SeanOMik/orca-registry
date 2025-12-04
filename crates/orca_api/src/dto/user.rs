@@ -16,7 +16,7 @@ use super::{RepositoryVisibility, scope::Scope};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoginSource {
     Database = 0,
-    LDAP = 1
+    Ldap = 1
 }
 
 impl TryFrom<u32> for LoginSource {
@@ -25,7 +25,7 @@ impl TryFrom<u32> for LoginSource {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Database),
-            1 => Ok(Self::LDAP),
+            1 => Ok(Self::Ldap),
             _ => Err(anyhow::anyhow!("Invalid value for LoginSource: `{}`", value)),
         }
     }
@@ -147,7 +147,7 @@ async fn user_auth_from_request_parts_impl(parts: &mut Parts, state: &Arc<AppSta
     };
 
     // If the token is not valid, return an unauthorized response
-    let jwt_key: Hmac<Sha256> = Hmac::new_from_slice(state.config.jwt_key.as_bytes())
+    let jwt_key: Hmac<Sha256> = Hmac::new_from_slice(state.config.jwt_secret.as_bytes())
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new()) )?;
 
     match VerifyWithKey::<AuthToken>::verify_with_key(token, &jwt_key) {

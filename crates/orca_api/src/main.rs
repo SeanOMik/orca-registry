@@ -100,7 +100,7 @@ fn create_path_to(path: &str) -> io::Result<()> {
 #[tokio::main]
 #[warn(clippy::future_not_send)]
 async fn main() -> anyhow::Result<()> {
-    let mut config = Config::new().expect("Failure to parse config!");
+    let config = Config::new().expect("Failure to parse config!");
 
     let mut logging_guards = Vec::new();
     {
@@ -196,10 +196,7 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(15)
         .connect_with(connection_options)
         .await?;
-    pool.create_schema().await?;
-
-    // set jwt key
-    config.jwt_key = pool.get_jwt_secret().await?;
+    pool.run_migrations().await?;
 
     let storage_driver: Mutex<Box<dyn StorageDriver>> = match &config.storage {
         StorageConfig::Filesystem(fs) => Mutex::new(Box::new(FilesystemDriver::new(&fs.path))),

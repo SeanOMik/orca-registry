@@ -196,7 +196,7 @@ pub async fn auth_basic_get(
             }
 
             let token =
-                create_jwt_token(&state.config.jwt_key, state.config.token_max_age, None, auth.scope).map_err(|_| {
+                create_jwt_token(&state.config.jwt_secret, state.config.token_max_age, None, auth.scope).map_err(|_| {
                     error!("Failed to create jwt token!");
 
                     StatusCode::INTERNAL_SERVER_ERROR
@@ -323,7 +323,7 @@ pub async fn auth_basic_get(
         debug!("User password is correct");
 
         let now = SystemTime::now();
-        let token = create_jwt_token(&state.config.jwt_key, state.config.token_max_age, Some(&account), vec![])
+        let token = create_jwt_token(&state.config.jwt_secret, state.config.token_max_age, Some(&account), vec![])
             .map_err(|_| {
                 error!("Failed to create jwt token!");
 

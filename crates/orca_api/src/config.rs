@@ -139,6 +139,7 @@ pub struct Config {
     /// Defaults to 4hr (14400 seconds).
     #[serde(default = "default_token_max_age")]
     pub token_max_age: u64,
+    pub jwt_secret: String,
     #[serde(default)]
     pub limits: LimitConfig,
     pub log: LogConfig,
@@ -146,8 +147,6 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub storage: StorageConfig,
     pub tls: Option<TlsConfig>,
-    #[serde(skip)]
-    pub jwt_key: String,
 }
 
 #[allow(dead_code)]

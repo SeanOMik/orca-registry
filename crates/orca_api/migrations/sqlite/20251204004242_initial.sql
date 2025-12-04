@@ -1,9 +1,8 @@
-CREATE TABLE IF NOT EXISTS orca (
+CREATE TABLE IF NOT EXISTS _orca_meta (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    orca_version TEXT NOT NULL,
-    schema_version TEXT NOT NULL,
-    jwt_secret TEXT NOT NULL
+    orca_version TEXT NOT NULL
 );
+INSERT OR IGNORE INTO _orca_meta(orca_version) VALUES('0.1.1');
 
 CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL UNIQUE PRIMARY KEY,
@@ -17,30 +16,6 @@ CREATE TABLE IF NOT EXISTS repositories (
     owner_email TEXT,
     -- 0 = private, 1 = public
     visibility INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS image_manifests (
-    digest TEXT NOT NULL PRIMARY KEY,
-    repository TEXT NOT NULL,
-    subject_digest TEXT,
-    content TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS image_tags (
-    name TEXT NOT NULL,
-    repository TEXT NOT NULL,
-    -- the image manifest for this tag
-    image_manifest TEXT NOT NULL,
-    -- the epoch timestamp fo when this image tag was last updated
-    last_updated BIGINT NOT NULL,
-    PRIMARY KEY (name, repository)
-);
-
-CREATE TABLE IF NOT EXISTS manifest_layers (
-    manifest TEXT NOT NULL,
-    -- the digest of the layer for this manifest
-    layer_digest TEXT NOT NULL,
-    PRIMARY KEY (manifest, layer_digest)
 );
 
 CREATE TABLE IF NOT EXISTS users (
